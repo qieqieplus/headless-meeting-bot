@@ -1,0 +1,3 @@
+# ignore the SDK files added to the project
+zoomsdk/*
+!zoomsdk/.gitkeep

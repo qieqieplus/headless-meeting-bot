@@ -1,0 +1,33 @@
+# Build folder
+build/*
+!build/.gitkeep
+
+# MacOS
+.DS_Store
+
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+
+### IDE
+.idea/
+.vscode/
+
+### CMake template
+CMakeCache.txt
+CMakeFiles

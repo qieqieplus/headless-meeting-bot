@@ -1,0 +1,5 @@
+### Java
+.gradle/
+build/
+release/
+*.jar

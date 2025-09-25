@@ -1,0 +1,32 @@
+plugins {
+    id 'java'
+}
+
+group 'com.zoom'
+version '1.0.1-SNAPSHOT'
+archivesBaseName = 'zoom-sdk-jna'
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'net.java.dev.jna:jna:5.12.1'
+    implementation 'net.java.dev.jna:jna-platform:5.12.1'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+jar {
+    from('../build') {
+        include 'libzoomsdk_c.so'
+        into 'lib/native'
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
