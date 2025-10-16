@@ -37,8 +37,7 @@ void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResu
             message = "waiting for the meeting to start";
             break;
         default:
-            icon = "❌";
-            message = "unknown meeting status";
+            message = "meeting status: " + std::to_string(status);
             break;
     }
 

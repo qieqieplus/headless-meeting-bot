@@ -169,7 +169,7 @@ MeetingHandle zoom_meeting_create_and_join(ZoomSDKHandle sdk_handle,
 
     std::string mid = meeting_id ? meeting_id : "";
     std::string pwd = password ? password : "";
-    std::string name = display_name ? display_name : "Zoom Bot";
+    std::string name = display_name ? display_name : "Recording Bot";
     std::string token = join_token ? join_token : "";
     bool raw_audio = (enable_audio != 0);
     bool raw_video = (enable_video != 0);

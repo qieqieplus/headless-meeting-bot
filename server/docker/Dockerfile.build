@@ -16,7 +16,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
  && rm -rf /var/lib/apt/lists/*
 
 # Install Go toolchain (1.23) from official tarball
-ARG GO_VERSION=1.23.2
+ARG GO_VERSION=1.23.11
 RUN curl -fsSL https://golang.google.cn/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tgz \
  && rm -rf /usr/local/go \
  && tar -C /usr/local -xzf /tmp/go.tgz \

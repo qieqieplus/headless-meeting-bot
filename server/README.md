@@ -1,62 +1,8 @@
 # Headless Meeting Bot - Go Server
 
-This is the Go server component of the headless Zoom meeting bot that provides real-time audio streaming from Zoom meetings via WebSocket.
+For setup and deployment instructions, see the [main README](../README.md).
 
-## Scripts
-
-### `build.sh` - Build the Go application
-Builds the Go server binary from source code.
-
-```bash
-./build.sh
-```
-
-**What it does:**
-- Compiles the Go application to `headless-meeting-bot` binary
-- Shows build information and file details
-
-### `run.sh` - Run the server
-Runs the pre-built server binary with proper environment setup.
-
-```bash
-./run.sh
-```
-
-**What it does:**
-- Sets up environment variables (LD_LIBRARY_PATH, etc.)
-- Validates that the binary exists
-- Validates required credentials
-- Starts the server
-
-## Environment Variables
-
-### Required
-- `ZOOM_SDK_KEY` - Your Zoom SDK key
-- `ZOOM_SDK_SECRET` - Your Zoom SDK secret
-
-### Optional
-- `HTTP_ADDR` - Server listen address (default: `:8080`)
-- `LOG_LEVEL` - Log level (default: `info`)
-
-## Usage
-
-1. **First build:**
-   ```bash
-   ./build.sh
-   ```
-
-2. **Set credentials:**
-   ```bash
-   export ZOOM_SDK_KEY="your_sdk_key"
-   export ZOOM_SDK_SECRET="your_sdk_secret"
-   ```
-
-3. **Run the server:**
-   ```bash
-   ./run.sh
-   ```
-
-## API Endpoints
+## API Documentation
 
 ### Join Token Feature
 
@@ -78,7 +24,7 @@ Join a meeting.
 {
   "meeting_id": "1234567890",
   "password": "password",
-  "display_name": "My Bot",
+  "display_name": "Recording Bot",
   "join_token": "optional_join_token_for_recording_authorization"
 }
 ```
@@ -86,7 +32,7 @@ Join a meeting.
 **Fields:**
 - `meeting_id` (required): The meeting ID to join
 - `password` (optional): Meeting password if required
-- `display_name` (optional): Display name in the meeting (default: "Zoom Bot")
+- `display_name` (optional): Display name in the meeting (default: "Recording Bot")
 - `join_token` (optional): Join token for automatic recording authorization
 
 **Response:** `202 Accepted`
@@ -155,6 +101,19 @@ Get the status of a specific meeting.
 }
 ```
 
+#### `GET /health`
+
+Health check endpoint for monitoring.
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "ok",
+  "meeting_count": 2
+}
+```
+
 ### WebSocket API
 - `GET /ws/audio/{meeting_id}` - Stream real-time audio from a meeting
 
@@ -172,8 +131,8 @@ Sent immediately after WebSocket connection establishment:
 ```json
 {
   "type": "audio_format",
-  "sample_rate": 48000,
-  "channels": 2,
+  "sample_rate": 32000,
+  "channels": 1,
   "sample_format": "s16le"
 }
 ```
@@ -215,8 +174,8 @@ Offset  Size    Type     Description
 - `2`: Share audio (screen sharing audio)
 
 **Audio Data Format:**
-- **Sample Rate**: 48kHz (configurable)
-- **Channels**: 2 (stereo)
+- **Sample Rate**: 32kHz (configurable)
+- **Channels**: 1 (mono)
 - **Bit Depth**: 16-bit signed integer
 - **Endianness**: Little-endian
 - **Encoding**: Linear PCM (uncompressed)
@@ -227,95 +186,3 @@ Offset  Size    Type     Description
 0x0000000000000000   0x0000000000000001   [audio samples...]
 (mixed audio)        (user ID 1)          (S16LE stereo)
 ```
-
-
-**Runtime Environment:**
-- `LD_LIBRARY_PATH`: Runtime library search paths
-- Automatically set by `run.sh` for proper library loading
-
-## Docker Deployment
-
-The Docker-related files are organized in the `docker/` directory for better project structure:
-
-- `docker/Dockerfile.build` - Build image for compilation
-- `docker/Dockerfile` - Deploy image for runtime
-- `docker/docker-compose.yml` - Deploy container orchestration
-- `docker/docker-compose.build.yml` - Build container orchestration
-- `docker/docker-build.sh` - Build script supporting both modes
-- `docker/env.example` - Environment variables template
-- `docker/DOCKER.md` - Comprehensive deployment guide
-
-### Quick Start with Docker
-
-1. **Build everything in Docker (recommended):**
-   ```bash
-   # Build compilation image
-   ./docker/docker-build.sh build
-   
-   # Build deploy image
-   ./docker/docker-build.sh deploy
-   ```
-   
-   **Or build locally first:**
-   ```bash
-   # Build locally
-   ./build.sh
-   
-   # Build deploy image only
-   ./docker/docker-build.sh deploy
-   ```
-
-2. **Set up environment variables:**
-   ```bash
-   cp docker/env.example .env
-   # Edit .env with your Zoom SDK credentials
-   ```
-
-3. **Run with Docker Compose:**
-   ```bash
-   docker-compose -f docker/docker-compose.yml up -d
-   ```
-
-4. **View logs:**
-   ```bash
-   docker-compose -f docker/docker-compose.yml logs -f
-   ```
-
-### Manual Docker Run
-
-```bash
-# Build the deploy image
-./docker/docker-build.sh deploy
-
-# Run the container
-docker run -d --name meeting-bot \
-  -p 8080:8080 \
-  -e ZOOM_SDK_KEY="your_sdk_key" \
-  -e ZOOM_SDK_SECRET="your_sdk_secret" \
-  -v $(pwd)/recordings:/app/recordings \
-  headless-meeting-bot:latest
-```
-
-### Docker Features
-
-- **Minimal Alpine Linux base image** for small footprint
-- **All required C libraries included** (Zoom SDK, Qt, OpenSSL, etc.)
-- **Non-root user** for security
-- **Health checks** for container monitoring
-- **Volume mounts** for persistent recordings
-- **Resource limits** to prevent excessive usage
-- **Separate build and deploy images** for clean separation of concerns
-- **Build image**: Compiles everything in Docker
-- **Deploy image**: Minimal runtime with pre-built binaries
-
-### Docker Environment Variables
-
-- `ZOOM_SDK_KEY` (required): Your Zoom SDK key
-- `ZOOM_SDK_SECRET` (required): Your Zoom SDK secret
-- `HTTP_ADDR` (optional): Server listen address (default: `:8080`)
-- `LOG_LEVEL` (optional): Log level (default: `info`)
-
-### Docker Volumes
-
-- `/app/recordings`: Directory for meeting recordings
-- `/app/logs`: Directory for application logs (optional)

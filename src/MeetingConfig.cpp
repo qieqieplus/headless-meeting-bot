@@ -15,4 +15,3 @@ MeetingConfig::MeetingConfig(const string& meetingId,
     , m_useRawAudio(useRawAudio)
     , m_useRawVideo(useRawVideo) {
 }
-

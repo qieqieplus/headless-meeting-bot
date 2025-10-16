@@ -71,12 +71,14 @@ SDKError Meeting::setupMeetingEvents() {
         auto* participantsCtrl = m_meetingService->GetMeetingParticipantsController();
         if (participantsCtrl) {
             if (auto* botUser = participantsCtrl->GetMySelfUser()) {
+                
                 if (auto* audioCtrl = m_meetingService->GetMeetingAudioController()) {
+                    audioCtrl->MuteAudio(botUser->GetUserID());
                     // a workaround to join audio
                     // https://devforum.zoom.us/t/cant-record-audio-with-linux-meetingsdk-after-6-3-5-6495-error-code-32/130689/10
                     audioCtrl->JoinVoip();
-                    audioCtrl->MuteAudio(botUser->GetUserID());
                 }
+
                 if (auto* videoCtrl = m_meetingService->GetMeetingVideoController()) {
                     videoCtrl->MuteVideo();
                 }
@@ -248,7 +250,7 @@ SDKError Meeting::startRawRecording() {
             Util::Logger::getInstance().error("Video source delegate not set");
             return SDKERR_UNINITIALIZE;
         }
-            
+
         err = createRenderer(&m_videoHelper, m_videoSource);
         if (hasError(err, "create renderer"))
             return err;

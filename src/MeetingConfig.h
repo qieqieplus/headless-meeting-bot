@@ -18,7 +18,7 @@ private:
 public:
     MeetingConfig(const string& meetingId = "",
                   const string& password = "",
-                  const string& displayName = "Zoom Meeting Bot",
+                  const string& displayName = "",
                   bool isMeetingStart = false,
                   const string& joinToken = "",
                   bool useRawAudio = false,

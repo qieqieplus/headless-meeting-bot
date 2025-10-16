@@ -12,7 +12,8 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
+    dbus \
+    dbus-x11 \
     libasan6 \
     libatomic1 \
     libgbm1 \
@@ -29,9 +30,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-keysyms1 \
     libxcb-xtest0 \
     pciutils \
-    net-tools \
-    dbus \
-    dbus-x11 \
     xvfb \
     wget \
     pulseaudio \
@@ -58,10 +56,6 @@ COPY --chown=appuser:appgroup lib/zoomsdk/lib* ./
 
 # Copy Qt libraries (minimal set required)
 COPY --chown=appuser:appgroup lib/zoomsdk/qt_libs/Qt/lib/lib* ./
-
-# Create directories for recordings and logs
-RUN mkdir -p /app/recordings /app/logs && \
-    chown -R appuser:appgroup /app
 
 # Set environment variables
 ENV LD_LIBRARY_PATH=/app
