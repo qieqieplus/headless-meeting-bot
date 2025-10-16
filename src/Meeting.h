@@ -4,25 +4,30 @@
 #include <iostream>
 #include <functional>
 #include <string>
+#include <memory>
 
 #include "MeetingConfig.h"
 
-#include "zoom_sdk.h"
-#include "rawdata/zoom_rawdata_api.h"
-#include "rawdata/rawdata_audio_helper_interface.h"
-
+// SDK interfaces needed by implementation
+#include "meeting_service_interface.h"
 #include "meeting_service_components/meeting_audio_interface.h"
 #include "meeting_service_components/meeting_participants_ctrl_interface.h"
-#include "meeting_service_interface.h"
+#include "meeting_service_components/meeting_sharing_interface.h"
+#include "meeting_service_components/meeting_video_interface.h"
 #include "setting_service_interface.h"
 
+// Raw data helpers
+#include "rawdata/zoom_rawdata_api.h"
+#include "rawdata/rawdata_audio_helper_interface.h"
+#include "rawdata/rawdata_renderer_interface.h"
+
+// Event implementations
 #include "events/MeetingServiceEvent.h"
 #include "events/MeetingReminderEvent.h"
 #include "events/MeetingRecordingCtrlEvent.h"
+#include "events/MeetingShareEvent.h"
 
-using namespace std;
 using namespace ZOOMSDK;
-
 
 class Meeting {
 
@@ -31,9 +36,9 @@ class Meeting {
     IZoomSDKAudioRawDataHelper* m_audioHelper;
     IZoomSDKAudioRawDataDelegate* m_audioSource;
 
-    // Video support (placeholder for now)
-    void* m_videoHelper;
-    void* m_videoSource;
+    // Video support
+    IZoomSDKRenderer* m_videoHelper;
+    IZoomSDKRendererDelegate* m_videoSource;
 
     bool m_isJoined;
     bool m_isRecording;
@@ -42,7 +47,19 @@ class Meeting {
     IMeetingService* m_meetingService;
     ISettingService* m_settingService;
 
+    // Event object ownership
+    std::unique_ptr<MeetingReminderEvent> m_reminderEvent;
+    std::unique_ptr<MeetingRecordingCtrlEvent> m_recordingEvent;
+    std::unique_ptr<MeetingServiceEvent> m_meetingServiceEvent;
+    std::unique_ptr<MeetingShareEvent> m_shareEvent;
+
+    // Share tracking
+    unsigned int m_currentShareSourceId;
+    bool m_shareSubscribed;
+
     SDKError setupMeetingEvents();
+    void subscribeShare(const ZoomSDKSharingSourceInfo& shareInfo);
+    void unSubscribeShare(const ZoomSDKSharingSourceInfo& shareInfo);
 
 public:
     Meeting(const MeetingConfig& config, IMeetingService* meetingService, ISettingService* settingService);
@@ -61,9 +78,13 @@ public:
     bool isRecording() const { return m_isRecording; }
     
     const MeetingConfig& getConfig() const { return m_config; }
+    IMeetingService* getMeetingService() const { return m_meetingService; }
 
     void setAudioSource(IZoomSDKAudioRawDataDelegate* source) { m_audioSource = source; }
     IZoomSDKAudioRawDataDelegate* getAudioSource() const { return m_audioSource; }
+    
+    void setVideoSource(IZoomSDKRendererDelegate* source) { m_videoSource = source; }
+    IZoomSDKRendererDelegate* getVideoSource() const { return m_videoSource; }
 
     // Static factory methods
     static Meeting* createMeeting(const MeetingConfig& meetingConfig, IMeetingService* meetingService, ISettingService* settingService);

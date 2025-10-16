@@ -29,7 +29,7 @@ echo "Copying JAR file to $RELEASE_DIR..."
 cp "$JAR_FILE" "$RELEASE_DIR/"
 
 # The native library is now packaged inside the JAR, so we don't need to copy it separately.
-# NATIVE_LIB_PATH="$PROJECT_ROOT/build/libzoomsdk_c.so"
+# NATIVE_LIB_PATH="$PROJECT_ROOT/src/build/libzoomsdk_c.so"
 #
 # if [ -f "$NATIVE_LIB_PATH" ]; then
 #     echo "Copying native library to $RELEASE_DIR..."

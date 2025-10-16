@@ -1,0 +1,36 @@
+# Build Docker image for compiling the headless meeting bot (Ubuntu Jammy, glibc)
+FROM ubuntu:22.04 AS builder
+
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# Install build dependencies per official docs and SDK needs
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl wget \
+    build-essential cmake pkgconf git \
+    gtkmm-3.0 \
+    # XCB libs (official doc)
+    libx11-xcb1 libxcb-xfixes0 libxcb-shape0 libxcb-shm0 libxcb-randr0 libxcb-image0 libxcb-keysyms1 libxcb-xtest0 \
+    # Additional build/link deps
+    libglib2.0-dev libssl-dev zlib1g-dev libasound2-dev libpulse-dev libx11-dev libxcb1-dev libxfixes-dev libdrm-dev mesa-common-dev libgbm-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Go toolchain (1.23) from official tarball
+ARG GO_VERSION=1.23.2
+RUN curl -fsSL https://golang.google.cn/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tgz \
+ && rm -rf /usr/local/go \
+ && tar -C /usr/local -xzf /tmp/go.tgz \
+ && rm /tmp/go.tgz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Set working directory
+WORKDIR /workspace
+
+# Create build script
+COPY docker/container-build.sh /usr/local/bin/container-build.sh
+# Normalize line endings and ensure executable
+RUN sed -i 's/\r$//' /usr/local/bin/container-build.sh && \
+    chmod +x /usr/local/bin/container-build.sh
+
+# Default command runs the build script
+CMD ["/usr/local/bin/container-build.sh"]

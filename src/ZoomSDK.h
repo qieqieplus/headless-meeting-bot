@@ -6,6 +6,7 @@
 #include <string>
 #include <sstream>
 #include <functional>
+#include <memory>
 
 #include <jwt-cpp/jwt.h>
 
@@ -39,6 +40,7 @@ class ZoomSDK {
     ISettingService* m_settingService;
     INetworkConnectionHelper* m_networkHelper;
     IMeetingService* m_meetingService;
+    std::unique_ptr<AuthServiceEvent> m_authEvent;
     
     string m_sdkKey;
     string m_sdkSecret;

@@ -103,7 +103,7 @@ SDKError ZoomSDK::authenticate(function<void()> onAuthCallback) {
     
     m_onAuthCallback = onAuthCallback;
     
-    function<void()> onAuth = [&]() {
+    function<void()> onAuth = [this]() {
         m_isAuthenticated = true;
         Util::Logger::getInstance().success("SDK authenticated successfully");
         if (m_onAuthCallback) {
@@ -111,7 +111,8 @@ SDKError ZoomSDK::authenticate(function<void()> onAuthCallback) {
         }
     };
     
-    err = m_authService->SetEvent(new AuthServiceEvent(onAuth));
+    m_authEvent = std::make_unique<AuthServiceEvent>(onAuth);
+    err = m_authService->SetEvent(m_authEvent.get());
     if (hasError(err, "set auth event")) return err;
     
     generateJWT(m_sdkKey, m_sdkSecret);
@@ -147,9 +148,13 @@ SDKError ZoomSDK::cleanup() {
     }
     
     if (m_authService) {
+        m_authService->SetEvent(nullptr);
         DestroyAuthService(m_authService);
         m_authService = nullptr;
     }
+
+    // Release our owned event after service is gone
+    m_authEvent.reset();
     
     if (m_networkHelper) {
         DestroyNetworkConnectionHelper(m_networkHelper);
@@ -157,7 +162,8 @@ SDKError ZoomSDK::cleanup() {
     }
     
     if (m_isInitialized) {
-        CleanUPSDK();
+        // SDK crash due to an internal bug 
+        // CleanUPSDK();
         m_isInitialized = false;
     }
     

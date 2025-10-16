@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  headless-meeting-bot-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+    image: headless-meeting-bot-build:latest
+    container_name: headless-meeting-bot-build
+    volumes:
+      # Mount output directory to extract built artifacts
+      - ./build-output:/output
+    command: ["sh", "-c", "cp /output/headless-meeting-bot-build.tar.gz /output/ && ls -la /output"]
+    # Remove container after completion
+    restart: "no"

@@ -1,6 +1,6 @@
 # Build folder
-build/*
-!build/.gitkeep
+src/build/*
+!src/build/.gitkeep
 
 # MacOS
 .DS_Store
@@ -31,3 +31,7 @@ build/*
 ### CMake template
 CMakeCache.txt
 CMakeFiles
+
+### Python
+__pycache__/
+*.pyc

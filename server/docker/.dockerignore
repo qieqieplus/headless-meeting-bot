@@ -1,0 +1,32 @@
+# Build artifacts
+headless-meeting-bot
+build/
+*.log
+
+# Development files
+.git/
+.gitignore
+*.md
+README.md
+
+# Test files
+test_audio_recorder.py
+examples/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Recordings (these can be large)
+recordings/

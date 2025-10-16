@@ -12,7 +12,7 @@ private:
     bool m_isMeetingStart;
     string m_joinToken;
     bool m_useRawAudio;
-    bool m_useRawVideo;
+    bool m_useRawVideo;  // Always records share when enabled
     string m_displayName;
 
 public:

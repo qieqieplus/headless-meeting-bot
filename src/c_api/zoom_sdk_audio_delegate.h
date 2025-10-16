@@ -25,5 +25,3 @@ private:
 };
 
 #endif // ZOOM_SDK_AUDIO_DELEGATE_H
-
-

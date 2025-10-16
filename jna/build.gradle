@@ -23,7 +23,7 @@ test {
 }
 
 jar {
-    from('../build') {
+    from('../src/build') {
         include 'libzoomsdk_c.so'
         into 'lib/native'
     }

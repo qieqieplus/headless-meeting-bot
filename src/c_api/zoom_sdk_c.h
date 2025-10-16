@@ -18,10 +18,37 @@ typedef void* MeetingHandle;
 // Audio callback function type
 typedef void (*OnAudioDataReceivedCallback)(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id);
 
+// Video callback function type
+typedef void (*OnVideoDataReceivedCallback)(MeetingHandle meeting_handle, 
+                                            const char* y_buffer, const char* u_buffer, const char* v_buffer,
+                                            unsigned int width, unsigned int height, 
+                                            unsigned int buffer_len, unsigned int source_id,
+                                            unsigned long long timestamp);
+
 // Audio type constants
 #define ZOOM_AUDIO_TYPE_MIXED 0
 #define ZOOM_AUDIO_TYPE_ONE_WAY 1
 #define ZOOM_AUDIO_TYPE_SHARE 2
+
+// Meeting status constants (matches Zoom SDK MeetingStatus enum)
+typedef enum {
+    ZOOM_MEETING_STATUS_IDLE = 0,
+    ZOOM_MEETING_STATUS_CONNECTING = 1,
+    ZOOM_MEETING_STATUS_WAITINGFORHOST = 2,
+    ZOOM_MEETING_STATUS_INMEETING = 3,
+    ZOOM_MEETING_STATUS_DISCONNECTING = 4,
+    ZOOM_MEETING_STATUS_RECONNECTING = 5,
+    ZOOM_MEETING_STATUS_FAILED = 6,
+    ZOOM_MEETING_STATUS_ENDED = 7,
+    ZOOM_MEETING_STATUS_UNKNOWN = 8,
+    ZOOM_MEETING_STATUS_LOCKED = 9,
+    ZOOM_MEETING_STATUS_UNLOCKED = 10,
+    ZOOM_MEETING_STATUS_IN_WAITING_ROOM = 11,
+    ZOOM_MEETING_STATUS_WEBINAR_PROMOTE = 12,
+    ZOOM_MEETING_STATUS_WEBINAR_DEPROMOTE = 13,
+    ZOOM_MEETING_STATUS_JOIN_BREAKOUT_ROOM = 14,
+    ZOOM_MEETING_STATUS_LEAVE_BREAKOUT_ROOM = 15
+} ZoomMeetingStatus;
 
 // === SIMPLIFIED API ===
 
@@ -45,14 +72,19 @@ void zoom_sdk_destroy(ZoomSDKHandle handle);
  * @param meeting_id The meeting ID to join
  * @param password The meeting password (can be NULL)
  * @param display_name The display name to use in the meeting (can be NULL for default)
+ * @param join_token The join token for automatic recording authorization (can be NULL)
  * @param enable_audio 1 to enable raw audio capture, 0 otherwise
+ * @param enable_video 1 to enable raw video (shared screen) capture, 0 otherwise
  * @return MeetingHandle on success, NULL on failure
+ * @note Video always captures shared screens from other participants, not camera feeds
  */
 MeetingHandle zoom_meeting_create_and_join(ZoomSDKHandle sdk_handle,
                                            const char* meeting_id,
                                            const char* password,
                                            const char* display_name,
-                                           int enable_audio);
+                                           const char* join_token,
+                                           int enable_audio,
+                                           int enable_video);
 
 /**
  * Leave and destroy a meeting
@@ -61,12 +93,28 @@ MeetingHandle zoom_meeting_create_and_join(ZoomSDKHandle sdk_handle,
 void zoom_meeting_destroy(MeetingHandle meeting_handle);
 
 /**
+ * Get the current meeting status
+ * @param meeting_handle The meeting handle
+ * @return ZoomMeetingStatus indicating the current status, or ZOOM_MEETING_STATUS_UNKNOWN if handle is invalid
+ */
+ZoomMeetingStatus zoom_meeting_get_status(MeetingHandle meeting_handle);
+
+/**
  * Set audio callback for receiving raw audio data
  * @param meeting_handle The meeting handle
  * @param callback The audio callback function
  * @return ZoomSDKResult indicating success or failure
  */
 ZoomSDKResult zoom_meeting_set_audio_callback(MeetingHandle meeting_handle, OnAudioDataReceivedCallback callback);
+
+/**
+ * Set video callback for receiving raw video data
+ * @param meeting_handle The meeting handle
+ * @param callback The video callback function
+ * @return ZoomSDKResult indicating success or failure
+ * @note This callback receives shared-screen frames in YUV420 format
+ */
+ZoomSDKResult zoom_meeting_set_video_callback(MeetingHandle meeting_handle, OnVideoDataReceivedCallback callback);
 
 /**
  * Run the main event loop to process SDK callbacks
@@ -82,8 +130,13 @@ void zoom_sdk_run_loop();
  */
 void zoom_sdk_stop_loop();
 
-// Internal function used by audio delegate - not part of public API
+// Internal functions used by delegates - not part of public API
 void zoom_meeting_dispatch_audio(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id);
+void zoom_meeting_dispatch_video(MeetingHandle meeting_handle, 
+                                 const char* y_buffer, const char* u_buffer, const char* v_buffer,
+                                 unsigned int width, unsigned int height,
+                                 unsigned int buffer_len, unsigned int source_id,
+                                 unsigned long long timestamp);
 
 #ifdef __cplusplus
 }
