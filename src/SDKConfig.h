@@ -3,28 +3,27 @@
 
 #include <string>
 
-using namespace std;
 
 class SDKConfig {
 private:
-    string m_sdkKey;
-    string m_sdkSecret;
-    string m_zoomHost;
+    std::string m_sdkKey;
+    std::string m_sdkSecret;
+    std::string m_zoomHost;
 
 public:
-    SDKConfig(const string& sdkKey = "",
-              const string& sdkSecret = "",
-              const string& zoomHost = "https://zoom.us");
+    SDKConfig(const std::string& sdkKey = "",
+              const std::string& sdkSecret = "",
+              const std::string& zoomHost = "https://zoom.us");
 
     // Getters
-    const string& sdkKey() const { return m_sdkKey; }
-    const string& sdkSecret() const { return m_sdkSecret; }
-    const string& zoomHost() const { return m_zoomHost; }
+    const std::string& sdkKey() const { return m_sdkKey; }
+    const std::string& sdkSecret() const { return m_sdkSecret; }
+    const std::string& zoomHost() const { return m_zoomHost; }
     
     // Setters
-    void setSdkKey(const string& sdkKey) { m_sdkKey = sdkKey; }
-    void setSdkSecret(const string& sdkSecret) { m_sdkSecret = sdkSecret; }
-    void setZoomHost(const string& zoomHost) { m_zoomHost = zoomHost; }
+    void setSdkKey(const std::string& sdkKey) { m_sdkKey = sdkKey; }
+    void setSdkSecret(const std::string& sdkSecret) { m_sdkSecret = sdkSecret; }
+    void setZoomHost(const std::string& zoomHost) { m_zoomHost = zoomHost; }
     
     // Validation
     bool isValid() const {

@@ -3,42 +3,41 @@
 
 #include <string>
 
-using namespace std;
 
 class MeetingConfig {
 private:
-    string m_meetingId;
-    string m_password;
+    std::string m_meetingId;
+    std::string m_password;
     bool m_isMeetingStart;
-    string m_joinToken;
+    std::string m_joinToken;
     bool m_useRawAudio;
     bool m_useRawVideo;  // Always records share when enabled
-    string m_displayName;
+    std::string m_displayName;
 
 public:
-    MeetingConfig(const string& meetingId = "",
-                  const string& password = "",
-                  const string& displayName = "",
+    MeetingConfig(const std::string& meetingId = "",
+                  const std::string& password = "",
+                  const std::string& displayName = "",
                   bool isMeetingStart = false,
-                  const string& joinToken = "",
+                  const std::string& joinToken = "",
                   bool useRawAudio = false,
                   bool useRawVideo = false);
 
     // Getters
-    const string& meetingId() const { return m_meetingId; }
-    const string& password() const { return m_password; }
-    const string& displayName() const { return m_displayName; }
-    const string& joinToken() const { return m_joinToken; }
+    const std::string& meetingId() const { return m_meetingId; }
+    const std::string& password() const { return m_password; }
+    const std::string& displayName() const { return m_displayName; }
+    const std::string& joinToken() const { return m_joinToken; }
     bool isMeetingStart() const { return m_isMeetingStart; }
     bool useRawAudio() const { return m_useRawAudio; }
     bool useRawVideo() const { return m_useRawVideo; }
     bool useRawRecording() const { return m_useRawAudio || m_useRawVideo; }
 
     // Setters
-    void setMeetingId(const string& meetingId) { m_meetingId = meetingId; }
-    void setPassword(const string& password) { m_password = password; }
-    void setDisplayName(const string& displayName) { m_displayName = displayName; }
-    void setJoinToken(const string& joinToken) { m_joinToken = joinToken; }
+    void setMeetingId(const std::string& meetingId) { m_meetingId = meetingId; }
+    void setPassword(const std::string& password) { m_password = password; }
+    void setDisplayName(const std::string& displayName) { m_displayName = displayName; }
+    void setJoinToken(const std::string& joinToken) { m_joinToken = joinToken; }
     void setMeetingStart(bool isMeetingStart) { m_isMeetingStart = isMeetingStart; }
     void setUseRawAudio(bool useRawAudio) { m_useRawAudio = useRawAudio; }
     void setUseRawVideo(bool useRawVideo) { m_useRawVideo = useRawVideo; }

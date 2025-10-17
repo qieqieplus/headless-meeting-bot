@@ -7,10 +7,8 @@
 #include "rawdata/rawdata_audio_helper_interface.h"
 #include "zoom_sdk_c.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class ZoomSDKAudioRawDataDelegate : public IZoomSDKAudioRawDataDelegate {
+class ZoomSDKAudioRawDataDelegate : public ZOOMSDK::IZoomSDKAudioRawDataDelegate {
 public:
     explicit ZoomSDKAudioRawDataDelegate(MeetingHandle meetingHandle)
         : m_meetingHandle(meetingHandle) {}

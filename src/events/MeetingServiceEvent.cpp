@@ -1,39 +1,39 @@
 #include "MeetingServiceEvent.h"
 #include "util/Logger.h"
 
-MeetingServiceEvent::MeetingServiceEvent(function<void()> onJoin, function<void()> onEnd)
+MeetingServiceEvent::MeetingServiceEvent(std::function<void()> onJoin, std::function<void()> onEnd)
     : m_onMeetingJoin(onJoin), m_onMeetingEnd(onEnd) {
 }
-void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResult) {
+void MeetingServiceEvent::onMeetingStatusChanged(ZOOMSDK::MeetingStatus status, int iResult) {
 
-    string message;
+    std::string message;
     std::string icon = "⏳";
 
     switch (status) {
-        case MEETING_STATUS_CONNECTING:
+        case ZOOMSDK::MEETING_STATUS_CONNECTING:
             message = "connecting to the meeting";
             break;
-        case MEETING_STATUS_RECONNECTING:
+        case ZOOMSDK::MEETING_STATUS_RECONNECTING:
             message = "reconnecting to the meeting";
             break;
-        case MEETING_STATUS_DISCONNECTING:
+        case ZOOMSDK::MEETING_STATUS_DISCONNECTING:
             message = "disconnecting from the meeting";
             break;
-        case MEETING_STATUS_INMEETING:
+        case ZOOMSDK::MEETING_STATUS_INMEETING:
             message = "joined meeting";
             Util::Logger::getInstance().success(message);
             if (m_onMeetingJoin) m_onMeetingJoin();
             return;
-        case MEETING_STATUS_ENDED:
+        case ZOOMSDK::MEETING_STATUS_ENDED:
             message = "meeting ended";
             Util::Logger::getInstance().success(message);
             if (m_onMeetingEnd) m_onMeetingEnd();
             return;
-        case MEETING_STATUS_FAILED:
+        case ZOOMSDK::MEETING_STATUS_FAILED:
             icon = "❌";
             message = "failed to connect to the meeting";
             break;
-        case MEETING_STATUS_WAITINGFORHOST:
+        case ZOOMSDK::MEETING_STATUS_WAITINGFORHOST:
             message = "waiting for the meeting to start";
             break;
         default:
@@ -45,11 +45,11 @@ void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResu
         Util::Logger::getInstance().info(message);
 }
 
-void MeetingServiceEvent::onMeetingParameterNotification(const MeetingParameter *meeting_param) {
+void MeetingServiceEvent::onMeetingParameterNotification(const ZOOMSDK::MeetingParameter *meeting_param) {
     // Callback not implemented
 }
 
-void MeetingServiceEvent::onMeetingStatisticsWarningNotification(StatisticsWarningType type) {
+void MeetingServiceEvent::onMeetingStatisticsWarningNotification(ZOOMSDK::StatisticsWarningType type) {
     // Callback not implemented
 }
 

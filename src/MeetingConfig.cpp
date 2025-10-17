@@ -1,10 +1,10 @@
 #include "MeetingConfig.h"
 
-MeetingConfig::MeetingConfig(const string& meetingId,
-                             const string& password,
-                             const string& displayName,
+MeetingConfig::MeetingConfig(const std::string& meetingId,
+                             const std::string& password,
+                             const std::string& displayName,
                              bool isMeetingStart,
-                             const string& joinToken,
+                             const std::string& joinToken,
                              bool useRawAudio,
                              bool useRawVideo)
     : m_meetingId(meetingId)

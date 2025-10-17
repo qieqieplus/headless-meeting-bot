@@ -1,25 +1,25 @@
 #include "AuthServiceEvent.h"
 #include "util/Logger.h"
 
-AuthServiceEvent::AuthServiceEvent(function<void()> onAuth) {
+AuthServiceEvent::AuthServiceEvent(std::function<void()> onAuth) {
     m_onAuth = std::move(onAuth);
 }
 
-void AuthServiceEvent::onAuthenticationReturn(AuthResult result) {
-    stringstream message;
+void AuthServiceEvent::onAuthenticationReturn(ZOOMSDK::AuthResult result) {
+    std::stringstream message;
     message << "authentication failed because the ";
 
     switch (result) {
-        case AUTHRET_KEYORSECRETEMPTY:
+        case ZOOMSDK::AUTHRET_KEYORSECRETEMPTY:
             message << "key or secret is empty";
             break;
-        case AUTHRET_JWTTOKENWRONG:
+        case ZOOMSDK::AUTHRET_JWTTOKENWRONG:
             message << "JWT is invalid";
             break;
-        case AUTHRET_OVERTIME:
+        case ZOOMSDK::AUTHRET_OVERTIME:
             message << "operation timed out";
             break;
-        case AUTHRET_SUCCESS:
+        case ZOOMSDK::AUTHRET_SUCCESS:
             if (m_onAuth) m_onAuth();
             else message << "authentication callback was not set";
             break;
@@ -28,7 +28,7 @@ void AuthServiceEvent::onAuthenticationReturn(AuthResult result) {
             break;
     }
 
-    if (result != AUTHRET_SUCCESS) {
+    if (result != ZOOMSDK::AUTHRET_SUCCESS) {
         Util::Logger::getInstance().error(message.str());
         abort();
     }
@@ -48,6 +48,6 @@ void AuthServiceEvent::onZoomAuthIdentityExpired() {
     // Callback not implemented
 }
 
-void AuthServiceEvent::onLoginReturnWithReason(LOGINSTATUS ret, IAccountInfo *pAccountInfo, LoginFailReason reason) {
+void AuthServiceEvent::onLoginReturnWithReason(ZOOMSDK::LOGINSTATUS ret, ZOOMSDK::IAccountInfo *pAccountInfo, ZOOMSDK::LoginFailReason reason) {
     // Callback not implemented
 }

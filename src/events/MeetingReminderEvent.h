@@ -6,10 +6,8 @@
 #include <iostream>
 #include "meeting_service_components/meeting_reminder_ctrl_interface.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class MeetingReminderEvent : public IMeetingReminderEvent
+class MeetingReminderEvent : public ZOOMSDK::IMeetingReminderEvent
 {
 public:
     /**
@@ -17,8 +15,8 @@ public:
      * @param content content of the reminder
      * @param handle reminder handler for the reminder type
      */
-    void onReminderNotify(IMeetingReminderContent* content, IMeetingReminderHandler* handle) override;
-    void onEnableReminderNotify(IMeetingReminderContent* content, IMeetingEnableReminderHandler* handle) override;
+    void onReminderNotify(ZOOMSDK::IMeetingReminderContent* content, ZOOMSDK::IMeetingReminderHandler* handle) override;
+    void onEnableReminderNotify(ZOOMSDK::IMeetingReminderContent* content, ZOOMSDK::IMeetingEnableReminderHandler* handle) override;
 };
 
 

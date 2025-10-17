@@ -27,25 +27,24 @@
 #include "events/MeetingRecordingCtrlEvent.h"
 #include "events/MeetingShareEvent.h"
 
-using namespace ZOOMSDK;
 
 class Meeting {
 
     MeetingConfig m_config;
 
-    IZoomSDKAudioRawDataHelper* m_audioHelper;
-    IZoomSDKAudioRawDataDelegate* m_audioSource;
+    ZOOMSDK::IZoomSDKAudioRawDataHelper* m_audioHelper;
+    ZOOMSDK::IZoomSDKAudioRawDataDelegate* m_audioSource;
 
     // Video support
-    IZoomSDKRenderer* m_videoHelper;
-    IZoomSDKRendererDelegate* m_videoSource;
+    ZOOMSDK::IZoomSDKRenderer* m_videoHelper;
+    ZOOMSDK::IZoomSDKRendererDelegate* m_videoSource;
 
     bool m_isJoined;
     bool m_isRecording;
 
     // Service references (injected instead of obtained from singleton)
-    IMeetingService* m_meetingService;
-    ISettingService* m_settingService;
+    ZOOMSDK::IMeetingService* m_meetingService;
+    ZOOMSDK::ISettingService* m_settingService;
 
     // Event object ownership
     std::unique_ptr<MeetingReminderEvent> m_reminderEvent;
@@ -57,49 +56,49 @@ class Meeting {
     unsigned int m_currentShareSourceId;
     bool m_shareSubscribed;
 
-    SDKError setupMeetingEvents();
-    void subscribeShare(const ZoomSDKSharingSourceInfo& shareInfo);
-    void unSubscribeShare(const ZoomSDKSharingSourceInfo& shareInfo);
+    ZOOMSDK::SDKError setupMeetingEvents();
+    void subscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
+    void unSubscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
 
 public:
-    Meeting(const MeetingConfig& config, IMeetingService* meetingService, ISettingService* settingService);
+    Meeting(const MeetingConfig& config, ZOOMSDK::IMeetingService* meetingService, ZOOMSDK::ISettingService* settingService);
     ~Meeting();
 
-    SDKError join();
-    SDKError start();
-    SDKError leave();
+    ZOOMSDK::SDKError join();
+    ZOOMSDK::SDKError start();
+    ZOOMSDK::SDKError leave();
 
-    SDKError startOrJoin();
-    SDKError startRawRecording();
-    SDKError stopRawRecording();
+    ZOOMSDK::SDKError startOrJoin();
+    ZOOMSDK::SDKError startRawRecording();
+    ZOOMSDK::SDKError stopRawRecording();
 
     bool isMeetingStart() const;
     bool isJoined() const { return m_isJoined; }
     bool isRecording() const { return m_isRecording; }
     
     const MeetingConfig& getConfig() const { return m_config; }
-    IMeetingService* getMeetingService() const { return m_meetingService; }
+    ZOOMSDK::IMeetingService* getMeetingService() const { return m_meetingService; }
 
-    void setAudioSource(IZoomSDKAudioRawDataDelegate* source) { m_audioSource = source; }
-    IZoomSDKAudioRawDataDelegate* getAudioSource() const { return m_audioSource; }
+    void setAudioSource(ZOOMSDK::IZoomSDKAudioRawDataDelegate* source) { m_audioSource = source; }
+    ZOOMSDK::IZoomSDKAudioRawDataDelegate* getAudioSource() const { return m_audioSource; }
     
-    void setVideoSource(IZoomSDKRendererDelegate* source) { m_videoSource = source; }
-    IZoomSDKRendererDelegate* getVideoSource() const { return m_videoSource; }
+    void setVideoSource(ZOOMSDK::IZoomSDKRendererDelegate* source) { m_videoSource = source; }
+    ZOOMSDK::IZoomSDKRendererDelegate* getVideoSource() const { return m_videoSource; }
 
     // Static factory methods
-    static Meeting* createMeeting(const MeetingConfig& meetingConfig, IMeetingService* meetingService, ISettingService* settingService);
-    static Meeting* createMeeting(const string& meetingId,
-                                  const string& password,
-                                  const string& displayName,
+    static Meeting* createMeeting(const MeetingConfig& meetingConfig, ZOOMSDK::IMeetingService* meetingService, ZOOMSDK::ISettingService* settingService);
+    static Meeting* createMeeting(const std::string& meetingId,
+                                  const std::string& password,
+                                  const std::string& displayName,
                                   bool isMeetingStart,
-                                  const string& joinToken,
+                                  const std::string& joinToken,
                                   bool useRawAudio,
                                   bool useRawVideo,
-                                  IMeetingService* meetingService,
-                                  ISettingService* settingService);
+                                  ZOOMSDK::IMeetingService* meetingService,
+                                  ZOOMSDK::ISettingService* settingService);
 
     // Static utility methods
-    static bool hasError(SDKError e, const string& action="");
+    static bool hasError(ZOOMSDK::SDKError e, const std::string& action="");
 };
 
 #endif //HEADLESS_ZOOM_BOT_MEETING_H

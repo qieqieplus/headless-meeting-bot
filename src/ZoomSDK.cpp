@@ -4,6 +4,8 @@
 #include "util/Logger.h"
 #include <cstdlib>
 
+using namespace ZOOMSDK;
+
 ZoomSDK::ZoomSDK() 
     : m_authService(nullptr)
     , m_settingService(nullptr)
@@ -21,7 +23,7 @@ SDKError ZoomSDK::initialize(const SDKConfig& config) {
     return initialize(config.sdkKey(), config.sdkSecret(), config.zoomHost());
 }
 
-SDKError ZoomSDK::initialize(const string& sdkKey, const string& sdkSecret, const string& zoomHost) {
+SDKError ZoomSDK::initialize(const std::string& sdkKey, const std::string& sdkSecret, const std::string& zoomHost) {
     if (m_isInitialized) {
         return SDKERR_SUCCESS;
     }
@@ -74,7 +76,7 @@ SDKError ZoomSDK::createGlobalServices() {
     if (const char* proxy_env = getenv("HTTP_PROXY")) {
         proxy_setting.auto_detect = false;
         proxy_setting.proxy = proxy_env;
-        Util::Logger::getInstance().info("Proxy found: " + string(proxy_env));
+        Util::Logger::getInstance().info("Proxy found: " + std::string(proxy_env));
     }
     
     m_networkHelper->ConfigureProxy(proxy_setting);
@@ -86,7 +88,7 @@ SDKError ZoomSDK::createGlobalServices() {
     return SDKERR_SUCCESS;
 }
 
-SDKError ZoomSDK::authenticate(function<void()> onAuthCallback) {
+SDKError ZoomSDK::authenticate( std::function<void()> onAuthCallback) {
     if (!m_isInitialized) {
         return SDKERR_UNINITIALIZE;
     }
@@ -103,7 +105,7 @@ SDKError ZoomSDK::authenticate(function<void()> onAuthCallback) {
     
     m_onAuthCallback = onAuthCallback;
     
-    function<void()> onAuth = [this]() {
+     std::function<void()> onAuth = [this]() {
         m_isAuthenticated = true;
         Util::Logger::getInstance().success("SDK authenticated successfully");
         if (m_onAuthCallback) {
@@ -123,7 +125,7 @@ SDKError ZoomSDK::authenticate(function<void()> onAuthCallback) {
     return m_authService->SDKAuth(ctx);
 }
 
-void ZoomSDK::generateJWT(const string& key, const string& secret) {
+void ZoomSDK::generateJWT(const std::string& key, const std::string& secret) {
     m_iat = std::chrono::system_clock::now();
     m_exp = m_iat + std::chrono::hours{24};
     
@@ -131,9 +133,9 @@ void ZoomSDK::generateJWT(const string& key, const string& secret) {
             .set_type("JWT")
             .set_issued_at(m_iat)
             .set_expires_at(m_exp)
-            .set_payload_claim("appKey", claim(key))
-            .set_payload_claim("tokenExp", claim(m_exp))
-            .sign(algorithm::hs256{secret});
+            .set_payload_claim("appKey", jwt::claim(key))
+            .set_payload_claim("tokenExp", jwt::claim(m_exp))
+            .sign(jwt::algorithm::hs256{secret});
 }
 
 SDKError ZoomSDK::cleanup() {
@@ -173,12 +175,12 @@ SDKError ZoomSDK::cleanup() {
 }
 
 
-bool ZoomSDK::hasError(const SDKError e, const string& action) {
+bool ZoomSDK::hasError(const SDKError e, const std::string& action) {
     auto isError = e != SDKERR_SUCCESS;
 
     if(!action.empty()) {
         if (isError) {
-            stringstream ss;
+            std::stringstream ss;
             ss << "failed to " << action << " with status " << e;
             Util::Logger::getInstance().error(ss.str());
         } else {

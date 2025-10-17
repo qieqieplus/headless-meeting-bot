@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace SDK = ZOOMSDK;
+
 // Global state management
 static std::unordered_set<ZoomSDKHandle> g_sdk_instances;
 static std::unordered_set<MeetingHandle> g_meeting_instances;
@@ -110,9 +112,9 @@ ZoomSDKHandle zoom_sdk_create(const char* sdk_key, const char* sdk_secret) {
 
     // Create and initialize SDK
     ZoomSDK* sdk = new ZoomSDK();
-    SDKError result = sdk->initialize(config);
+    SDK::SDKError result = sdk->initialize(config);
 
-    if (result != SDKERR_SUCCESS) {
+    if (result != SDK::SDKERR_SUCCESS) {
         Util::Logger::getInstance().error("Failed to initialize SDK");
         delete sdk;
         return nullptr;
@@ -126,7 +128,7 @@ ZoomSDKHandle zoom_sdk_create(const char* sdk_key, const char* sdk_secret) {
         auth_success = true;
     });
 
-    if (result != SDKERR_SUCCESS ||
+    if (result != SDK::SDKERR_SUCCESS ||
         authentication_timeout(auth_mutex, auth_success, 10)
     ) {
         Util::Logger::getInstance().error("Failed to authenticate SDK");
@@ -200,8 +202,8 @@ MeetingHandle zoom_meeting_create_and_join(ZoomSDKHandle sdk_handle,
     }
 
     // Join the meeting
-    SDKError result = meeting->join();
-    if (result != SDKERR_SUCCESS) {
+    SDK::SDKError result = meeting->join();
+    if (result != SDK::SDKERR_SUCCESS) {
         std::cerr << "[ZoomSDK-C] Failed to join meeting, code: " << result << std::endl;
         delete meeting->getAudioSource();
         delete meeting->getVideoSource();
@@ -242,7 +244,7 @@ ZoomMeetingStatus zoom_meeting_get_status(MeetingHandle meeting_handle) {
         return ZOOM_MEETING_STATUS_UNKNOWN;
     }
 
-    IMeetingService* meetingService = meeting->getMeetingService();
+    auto* meetingService = meeting->getMeetingService();
     if (!meetingService) {
         std::cerr << "[ZoomSDK-C] Meeting service not available" << std::endl;
         return ZOOM_MEETING_STATUS_UNKNOWN;
@@ -250,7 +252,7 @@ ZoomMeetingStatus zoom_meeting_get_status(MeetingHandle meeting_handle) {
 
     // Get status from Zoom SDK and cast to our C-compatible enum
     // The enum values match exactly, so this is safe
-    ZOOMSDK::MeetingStatus sdkStatus = meetingService->GetMeetingStatus();
+    SDK::MeetingStatus sdkStatus = meetingService->GetMeetingStatus();
     return static_cast<ZoomMeetingStatus>(sdkStatus);
 }
 

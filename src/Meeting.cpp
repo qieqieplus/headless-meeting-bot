@@ -4,6 +4,8 @@
 #include <thread>
 #include <chrono>
 
+using namespace ZOOMSDK;
+
 Meeting::Meeting(const MeetingConfig& config, IMeetingService* meetingService, ISettingService* settingService)
     : m_config(config)
     , m_videoHelper(nullptr)
@@ -63,7 +65,7 @@ Meeting::~Meeting() {
 
 
 SDKError Meeting::setupMeetingEvents() {
-    function<void()> onJoin = [this]() {
+    std::function<void()> onJoin = [this]() {
         m_isJoined = true;
         Util::Logger::getInstance().success("Joined meeting successfully");
 
@@ -96,10 +98,10 @@ SDKError Meeting::setupMeetingEvents() {
         if (m_config.useRawVideo()) {
             auto* shareCtrl = m_meetingService->GetMeetingShareController();
             if (shareCtrl) {
-                auto onShareStart = [this](const ZOOMSDK::tagZoomSDKSharingSourceInfo& info) {
+                auto onShareStart = [this](const ZoomSDKSharingSourceInfo& info) {
                     subscribeShare(info);
                 };
-                auto onShareEnd = [this](const ZOOMSDK::tagZoomSDKSharingSourceInfo& info) {
+                auto onShareEnd = [this](const ZoomSDKSharingSourceInfo& info) {
                     unSubscribeShare(info);
                 };
                 m_shareEvent = std::make_unique<MeetingShareEvent>(onShareStart, onShareEnd);
@@ -114,7 +116,7 @@ SDKError Meeting::setupMeetingEvents() {
                 return;
             }
 
-            function<void(bool)> onRecordingPrivilegeChanged = [this](bool canRec) {
+            std::function<void(bool)> onRecordingPrivilegeChanged = [this](bool canRec) {
                 if (canRec)
                     startRawRecording();
                 else
@@ -133,7 +135,7 @@ SDKError Meeting::setupMeetingEvents() {
         }
     };
     
-    function<void()> onLeave = [this]() {
+    std::function<void()> onLeave = [this]() {
         m_isJoined = false;
         m_isRecording = false;
         Util::Logger::getInstance().info("Left meeting");
@@ -337,11 +339,11 @@ Meeting* Meeting::createMeeting(const MeetingConfig& meetingConfig, IMeetingServ
     return new Meeting(meetingConfig, meetingService, settingService);
 }
 
-Meeting* Meeting::createMeeting(const string& meetingId,
-                               const string& password,
-                               const string& displayName,
+Meeting* Meeting::createMeeting(const std::string& meetingId,
+                               const std::string& password,
+                               const std::string& displayName,
                                bool isMeetingStart,
-                               const string& joinToken,
+                               const std::string& joinToken,
                                bool useRawAudio,
                                bool useRawVideo,
                                IMeetingService* meetingService,
@@ -350,12 +352,12 @@ Meeting* Meeting::createMeeting(const string& meetingId,
     return createMeeting(config, meetingService, settingService);
 }
 
-bool Meeting::hasError(const SDKError e, const string& action) {
+bool Meeting::hasError(const SDKError e, const std::string& action) {
     auto isError = e != SDKERR_SUCCESS;
 
     if(!action.empty()) {
         if (isError) {
-            stringstream ss;
+            std::stringstream ss;
             ss << "failed to " << action << " with status " << e;
             Util::Logger::getInstance().error(ss.str());
         } else {

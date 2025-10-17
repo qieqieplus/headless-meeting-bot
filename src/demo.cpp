@@ -8,6 +8,7 @@
 #include "util/Logger.h"
 
 using namespace std;
+using namespace ZOOMSDK;
 
 // Global meeting instances for signal handling
 vector<Meeting*> g_meetings;

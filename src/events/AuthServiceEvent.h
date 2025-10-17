@@ -6,21 +6,19 @@
 #include <functional>
 #include "auth_service_interface.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class AuthServiceEvent : public IAuthServiceEvent  {
-    function<void()> m_onAuth;
+class AuthServiceEvent : public ZOOMSDK::IAuthServiceEvent  {
+    std::function<void()> m_onAuth;
 
 public:
-    AuthServiceEvent(function<void()> onAuth);
+    AuthServiceEvent(std::function<void()> onAuth);
     ~AuthServiceEvent() {};
 
     /**
      * callback that is triggered when authentication is complete
      * @param result status of the authentication return
      */
-    void onAuthenticationReturn(AuthResult result) override;
+    void onAuthenticationReturn(ZOOMSDK::AuthResult result) override;
 
     /**
      * Callback of login result with fail reason.
@@ -28,7 +26,7 @@ public:
      * @param pAccountInfo Account Info that is only valid when ret == LOGINRET_SUCCESS
      * @param reason Reason for login failure that is only valid when ret == LOGIN_FAILED
      */
-    void onLoginReturnWithReason(LOGINSTATUS ret, IAccountInfo* pAccountInfo, LoginFailReason reason) override;
+    void onLoginReturnWithReason(ZOOMSDK::LOGINSTATUS ret, ZOOMSDK::IAccountInfo* pAccountInfo, ZOOMSDK::LoginFailReason reason) override;
 
     /**
      * Logout result callback.

@@ -6,10 +6,8 @@
 #include "rawdata/rawdata_renderer_interface.h"
 #include "zoom_sdk_c.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class ZoomSDKVideoRendererDelegate : public IZoomSDKRendererDelegate {
+class ZoomSDKVideoRendererDelegate : public ZOOMSDK::IZoomSDKRendererDelegate {
 public:
     explicit ZoomSDKVideoRendererDelegate(MeetingHandle meetingHandle)
         : m_meetingHandle(meetingHandle) {}

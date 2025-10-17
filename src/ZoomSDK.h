@@ -20,11 +20,8 @@
 
 #include "events/AuthServiceEvent.h"
 
-using namespace std;
-using namespace jwt;
-using namespace ZOOMSDK;
 
-typedef chrono::time_point<chrono::system_clock> time_point;
+typedef std::chrono::time_point<std::chrono::system_clock> time_point;
 
 // Forward declarations
 class Meeting;
@@ -32,48 +29,48 @@ class MeetingConfig;
 
 class ZoomSDK {
     
-    string m_jwt;
+    std::string m_jwt;
     time_point m_iat;
     time_point m_exp;
     
-    IAuthService* m_authService;
-    ISettingService* m_settingService;
-    INetworkConnectionHelper* m_networkHelper;
-    IMeetingService* m_meetingService;
+    ZOOMSDK::IAuthService* m_authService;
+    ZOOMSDK::ISettingService* m_settingService;
+    ZOOMSDK::INetworkConnectionHelper* m_networkHelper;
+    ZOOMSDK::IMeetingService* m_meetingService;
     std::unique_ptr<AuthServiceEvent> m_authEvent;
     
-    string m_sdkKey;
-    string m_sdkSecret;
-    string m_zoomHost;
+    std::string m_sdkKey;
+    std::string m_sdkSecret;
+    std::string m_zoomHost;
     
     bool m_isInitialized;
     bool m_isAuthenticated;
     
-    function<void()> m_onAuthCallback;
+    std::function<void()> m_onAuthCallback;
     
-    SDKError createGlobalServices();
-    void generateJWT(const string& key, const string& secret);
+    ZOOMSDK::SDKError createGlobalServices();
+    void generateJWT(const std::string& key, const std::string& secret);
     
 public:
     ZoomSDK();
     ~ZoomSDK();
     
-    SDKError initialize(const SDKConfig& config);
-    SDKError initialize(const string& sdkKey, const string& sdkSecret, const string& zoomHost = "https://zoom.us");
-    SDKError authenticate(function<void()> onAuthCallback = nullptr);
+    ZOOMSDK::SDKError initialize(const SDKConfig& config);
+    ZOOMSDK::SDKError initialize(const std::string& sdkKey, const std::string& sdkSecret, const std::string& zoomHost = "https://zoom.us");
+    ZOOMSDK::SDKError authenticate(std::function<void()> onAuthCallback = nullptr);
     
-    SDKError cleanup();
+    ZOOMSDK::SDKError cleanup();
     
     bool isInitialized() const { return m_isInitialized; }
     bool isAuthenticated() const { return m_isAuthenticated; }
     
     // Access to global services
-    ISettingService* getSettingService() const { return m_settingService; }
-    INetworkConnectionHelper* getNetworkHelper() const { return m_networkHelper; }
-    IMeetingService* getMeetingService() const { return m_meetingService; }
+    ZOOMSDK::ISettingService* getSettingService() const { return m_settingService; }
+    ZOOMSDK::INetworkConnectionHelper* getNetworkHelper() const { return m_networkHelper; }
+    ZOOMSDK::IMeetingService* getMeetingService() const { return m_meetingService; }
         
     // Utility methods
-    static bool hasError(SDKError e, const string& action="");
+    static bool hasError(ZOOMSDK::SDKError e, const std::string& action="");
 };
 
 #endif //HEADLESS_ZOOM_BOT_ZOOM_SDK_H

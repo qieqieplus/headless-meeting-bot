@@ -1,7 +1,7 @@
 #include "MeetingReminderEvent.h"
 #include "util/Logger.h"
 
-void MeetingReminderEvent::onReminderNotify(IMeetingReminderContent* content, IMeetingReminderHandler* handle) {
+void MeetingReminderEvent::onReminderNotify(ZOOMSDK::IMeetingReminderContent* content, ZOOMSDK::IMeetingReminderHandler* handle) {
     if (content) {
         Util::Logger::getInstance().info("Reminder Notification Received");
         Util::Logger::getInstance().debug("Type: " + std::to_string(content->GetType()));
@@ -14,7 +14,7 @@ void MeetingReminderEvent::onReminderNotify(IMeetingReminderContent* content, IM
         handle->Accept();
 }
 
-void MeetingReminderEvent::onEnableReminderNotify(IMeetingReminderContent *content, IMeetingEnableReminderHandler *handle) {
+void MeetingReminderEvent::onEnableReminderNotify(ZOOMSDK::IMeetingReminderContent *content, ZOOMSDK::IMeetingEnableReminderHandler *handle) {
     if (content) {
         Util::Logger::getInstance().info("Enable Reminder Notification Received");
         Util::Logger::getInstance().debug("Type: " + std::to_string(content->GetType()));

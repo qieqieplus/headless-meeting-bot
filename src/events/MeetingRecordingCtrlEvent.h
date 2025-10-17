@@ -5,28 +5,26 @@
 #include <functional>
 #include "meeting_service_components/meeting_recording_interface.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class MeetingRecordingCtrlEvent : public IMeetingRecordingCtrlEvent {
+class MeetingRecordingCtrlEvent : public ZOOMSDK::IMeetingRecordingCtrlEvent {
 
-    function<void(bool)> m_onRecordingPrivilegeChanged;
+    std::function<void(bool)> m_onRecordingPrivilegeChanged;
 
 public:
-    MeetingRecordingCtrlEvent(function<void(bool)> onPrivilegeChanged);
+    MeetingRecordingCtrlEvent(std::function<void(bool)> onPrivilegeChanged);
     ~MeetingRecordingCtrlEvent();
 
     /**
      * Fires when the status of local recording changes
      * @param status local recording status
      */
-    void onRecordingStatus(RecordingStatus status) override;
+    void onRecordingStatus(ZOOMSDK::RecordingStatus status) override;
 
     /**
      * Fires when the status of cloud recording changes
      * @param status cloud recording status
      */
-    void onCloudRecordingStatus(RecordingStatus status) override;
+    void onCloudRecordingStatus(ZOOMSDK::RecordingStatus status) override;
 
     /**
      * Fires when recording privilege changes
@@ -38,20 +36,20 @@ public:
      * fires when the local recording privilege changes
      * @param status status of the local recording privliege request
      */
-    void onLocalRecordingPrivilegeRequestStatus(RequestLocalRecordingStatus status) override;
+    void onLocalRecordingPrivilegeRequestStatus(ZOOMSDK::RequestLocalRecordingStatus status) override;
 
     /**
      * Fires when a user requests local recording privilege
      * @param handler data when local recording privilege is requested
      */
-    void onLocalRecordingPrivilegeRequested(IRequestLocalRecordingPrivilegeHandler* handler) override;
+    void onLocalRecordingPrivilegeRequested(ZOOMSDK::IRequestLocalRecordingPrivilegeHandler* handler) override;
 
-    void onRequestCloudRecordingResponse(RequestStartCloudRecordingStatus status) override;
-    void onStartCloudRecordingRequested(IRequestStartCloudRecordingHandler* handler) override;
+    void onRequestCloudRecordingResponse(ZOOMSDK::RequestStartCloudRecordingStatus status) override;
+    void onStartCloudRecordingRequested(ZOOMSDK::IRequestStartCloudRecordingHandler* handler) override;
     void onCloudRecordingStorageFull(time_t gracePeriodDate) override;
-    void onEnableAndStartSmartRecordingRequested(IRequestEnableAndStartSmartRecordingHandler* handler) override;
-    void onSmartRecordingEnableActionCallback(ISmartRecordingEnableActionHandler* handler) override;
-    void onTranscodingStatusChanged(TranscodingStatus status,const zchar_t* path) override;
+    void onEnableAndStartSmartRecordingRequested(ZOOMSDK::IRequestEnableAndStartSmartRecordingHandler* handler) override;
+    void onSmartRecordingEnableActionCallback(ZOOMSDK::ISmartRecordingEnableActionHandler* handler) override;
+    void onTranscodingStatusChanged(ZOOMSDK::TranscodingStatus status,const zchar_t* path) override;
 };
 
 

@@ -6,35 +6,33 @@
 #include <functional>
 #include "meeting_service_interface.h"
 
-using namespace std;
-using namespace ZOOMSDK;
 
-class MeetingServiceEvent : public IMeetingServiceEvent {
-    function<void()> m_onMeetingJoin;
-    function<void()> m_onMeetingEnd;
+class MeetingServiceEvent : public ZOOMSDK::IMeetingServiceEvent {
+    std::function<void()> m_onMeetingJoin;
+    std::function<void()> m_onMeetingEnd;
 
 public:
-    MeetingServiceEvent(function<void()> onJoin, function<void()> onEnd);
+    MeetingServiceEvent(std::function<void()> onJoin, std::function<void()> onEnd);
 
     /**
      * Meeting status changed callback
      * @param status value of the current meeting status
      * @param iResult detailed reasons for special meeting statuses
      */
-    void onMeetingStatusChanged(MeetingStatus status, int iResult) override;
+    void onMeetingStatusChanged(ZOOMSDK::MeetingStatus status, int iResult) override;
 
     /**
      * callback will be triggered right before the meeting starts
      * The meeting_param will be destroyed once the function calls end
      * @param meeting_param holds parameters for a newly created meeting
      */
-    void onMeetingParameterNotification(const MeetingParameter* meeting_param) override;
+    void onMeetingParameterNotification(const ZOOMSDK::MeetingParameter* meeting_param) override;
 
     /**
      * callback used when there are Meeting statistics warning notifications
      * @param type type of statistics warning
      */
-    void onMeetingStatisticsWarningNotification(StatisticsWarningType type) override;
+    void onMeetingStatisticsWarningNotification(ZOOMSDK::StatisticsWarningType type) override;
 
     /**
      * Callback event when a meeting is suspended
