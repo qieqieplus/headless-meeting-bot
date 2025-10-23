@@ -18,12 +18,13 @@ typedef void* MeetingHandle;
 // Audio callback function type
 typedef void (*OnAudioDataReceivedCallback)(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id);
 
-// Video callback function type
-typedef void (*OnVideoDataReceivedCallback)(MeetingHandle meeting_handle, 
-                                            const char* y_buffer, const char* u_buffer, const char* v_buffer,
-                                            unsigned int width, unsigned int height, 
-                                            unsigned int buffer_len, unsigned int source_id,
-                                            unsigned long long timestamp);
+// HLS file callback - called when muxer writes a file (init.mp4, segments, playlist)
+typedef void (*OnHlsFileCallback)(MeetingHandle meeting_handle,
+                                  const char* filename,
+                                  const unsigned char* data,
+                                  size_t size,
+                                  int is_playlist,
+                                  uint64_t sequence);
 
 // Audio type constants
 #define ZOOM_AUDIO_TYPE_MIXED 0
@@ -107,14 +108,31 @@ ZoomMeetingStatus zoom_meeting_get_status(MeetingHandle meeting_handle);
  */
 ZoomSDKResult zoom_meeting_set_audio_callback(MeetingHandle meeting_handle, OnAudioDataReceivedCallback callback);
 
+// HLS video encoder/muxer configuration
+typedef struct {
+    int width;                  // <=0 auto-detected from first frame
+    int height;                 // <=0 auto-detected from first frame
+    int fps;                    // e.g., 30 (default)
+    int bitrate_kbps;           // e.g., 2500 (default)
+    int gop_seconds;            // e.g., 2 (keyframe interval in seconds)
+    int segment_seconds;        // e.g., 2 (HLS segment duration)
+    const char* encoder;        // "auto" (default), "x264", "nvenc"
+    const char* preset;         // "veryfast" (default), "medium", "slow", etc.
+    const char* hls_prefix;     // "media" (default) - base name for playlist/segments
+} ZoomHlsVideoConfig;
+
 /**
- * Set video callback for receiving raw video data
+ * Set HLS video callback and start encoding/muxing
  * @param meeting_handle The meeting handle
- * @param callback The video callback function
- * @return ZoomSDKResult indicating success or failure
- * @note This callback receives shared-screen frames in YUV420 format
+ * @param callback HLS file callback (NULL clears existing callback and stops encoding)
+ * @param config HLS encoder/muxer config; NULL uses defaults
  */
-ZoomSDKResult zoom_meeting_set_video_callback(MeetingHandle meeting_handle, OnVideoDataReceivedCallback callback);
+ZoomSDKResult zoom_meeting_set_hls_video_callback(MeetingHandle meeting_handle,
+                                                   OnHlsFileCallback callback,
+                                                   const ZoomHlsVideoConfig* config);
+
+/** Request an IDR (keyframe) from the encoder for the meeting. */
+ZoomSDKResult zoom_meeting_video_encoder_request_idr(MeetingHandle meeting_handle);
 
 /**
  * Run the main event loop to process SDK callbacks
@@ -130,13 +148,7 @@ void zoom_sdk_run_loop();
  */
 void zoom_sdk_stop_loop();
 
-// Internal functions used by delegates - not part of public API
-void zoom_meeting_dispatch_audio(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id);
-void zoom_meeting_dispatch_video(MeetingHandle meeting_handle, 
-                                 const char* y_buffer, const char* u_buffer, const char* v_buffer,
-                                 unsigned int width, unsigned int height,
-                                 unsigned int buffer_len, unsigned int source_id,
-                                 unsigned long long timestamp);
+// Internal helpers in private header `zoom_sdk_internal.h`
 
 #ifdef __cplusplus
 }

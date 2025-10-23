@@ -1,4 +1,5 @@
 #include "zoom_sdk_video_delegate.h"
+#include "zoom_sdk_internal.h"
 
 void ZoomSDKVideoRendererDelegate::onRendererBeDestroyed() {
     // Renderer is being destroyed, cleanup if needed
@@ -18,9 +19,9 @@ void ZoomSDKVideoRendererDelegate::onRawDataFrameReceived(YUVRawDataI420* data) 
     unsigned long long timestamp = data->GetTimeStamp();
     
     if (yBuffer && uBuffer && vBuffer && bufferLen > 0) {
-        // Dispatch video frame to C API callback
-        zoom_meeting_dispatch_video(m_meetingHandle, yBuffer, uBuffer, vBuffer, 
-                                    width, height, bufferLen, sourceId, timestamp);
+        // Push into encoding pipeline
+        zoom_meeting_dispatch_video(m_meetingHandle, yBuffer, uBuffer, vBuffer,
+                                   width, height, bufferLen, sourceId, timestamp);
     }
 }
 

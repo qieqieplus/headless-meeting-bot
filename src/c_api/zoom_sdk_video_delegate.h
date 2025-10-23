@@ -5,6 +5,7 @@
 #include "zoom_sdk_raw_data_def.h"
 #include "rawdata/rawdata_renderer_interface.h"
 #include "zoom_sdk_c.h"
+#include "../util/Logger.h"
 
 
 class ZoomSDKVideoRendererDelegate : public ZOOMSDK::IZoomSDKRendererDelegate {

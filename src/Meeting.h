@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <vector>
 
 #include "MeetingConfig.h"
 
@@ -52,13 +53,14 @@ class Meeting {
     std::unique_ptr<MeetingServiceEvent> m_meetingServiceEvent;
     std::unique_ptr<MeetingShareEvent> m_shareEvent;
 
-    // Share tracking
-    unsigned int m_currentShareSourceId;
+    // Share tracking (most-recent share on top)
+    std::vector<unsigned int> m_shareSourceIds;
     bool m_shareSubscribed;
 
     ZOOMSDK::SDKError setupMeetingEvents();
     void subscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
     void unSubscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
+    void subscribeTopShare();
 
 public:
     Meeting(const MeetingConfig& config, ZOOMSDK::IMeetingService* meetingService, ZOOMSDK::ISettingService* settingService);

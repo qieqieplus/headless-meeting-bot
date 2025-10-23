@@ -1,10 +1,9 @@
 /*
  * Unified Zoom SDK C API Demo
  *
- * Simple demo supporting three modes:
+ * Simple demo supporting two modes:
  *   - audio: Record audio only
- *   - video: Record audio + camera video
- *   - share: Record audio + shared screens
+ *   - video: Record audio + shared screens as HLS (fMP4 segments)
  */
 
 #include "zoom_sdk_c.h"
@@ -20,24 +19,39 @@ void audio_callback(MeetingHandle meeting_handle, const void* data, int length, 
         case ZOOM_AUDIO_TYPE_ONE_WAY: type_str = "ONE_WAY"; break;
         case ZOOM_AUDIO_TYPE_SHARE: type_str = "SHARE"; break;
     }
-    printf("[AUDIO] %d bytes, %s, node: %u\n", length, type_str, node_id);
+    // printf("[AUDIO] %d bytes, %s, node: %u\n", length, type_str, node_id);
 }
 
-// Video callback (receives both camera video and shared screens)
-void video_callback(MeetingHandle meeting_handle, 
-                   const char* y_buffer, const char* u_buffer, const char* v_buffer,
-                   unsigned int width, unsigned int height, 
-                   unsigned int buffer_len, unsigned int source_id,
-                   unsigned long long timestamp) {
-    printf("[VIDEO] %ux%u, %u bytes, source: %u, ts: %llu\n",
-           width, height, buffer_len, source_id, timestamp);
+// HLS file callback - saves each file (init.mp4, segments, playlist) to disk
+void hls_file_callback(MeetingHandle meeting_handle,
+                       const char* filename,
+                       const unsigned char* data,
+                       size_t size,
+                       int is_playlist,
+                       uint64_t sequence) {
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        fprintf(stderr, "[HLS] Failed to open %s for writing\n", filename);
+        return;
+    }
+    
+    size_t written = fwrite(data, 1, size, f);
+    fclose(f);
+    
+    if (written != size) {
+        fprintf(stderr, "[HLS] Write error for %s: wrote %zu/%zu bytes\n", filename, written, size);
+        return;
+    }
+    
+    const char* type = is_playlist ? "PLAYLIST" : "SEGMENT";
+    printf("[HLS] Wrote %s: %s (%zu bytes, seq=%llu)\n", type, filename, size, (unsigned long long)sequence);
 }
 
 void print_usage(const char* program_name) {
     fprintf(stderr, "Usage: %s <mode> <meeting_id> <password>\n\n", program_name);
     fprintf(stderr, "Modes:\n");
     fprintf(stderr, "  audio  - Record audio only\n");
-    fprintf(stderr, "  video  - Record audio + shared screens\n\n");
+    fprintf(stderr, "  video  - Record audio + shared screens (HLS fMP4)\n\n");
     fprintf(stderr, "Environment Variables:\n");
     fprintf(stderr, "  ZOOM_SDK_KEY     - Required: Your SDK key\n");
     fprintf(stderr, "  ZOOM_SDK_SECRET  - Required: Your SDK secret\n");
@@ -45,12 +59,15 @@ void print_usage(const char* program_name) {
     fprintf(stderr, "Examples:\n");
     fprintf(stderr, "  %s audio 1234567890 mypass\n", program_name);
     fprintf(stderr, "  %s video 1234567890 mypass\n", program_name);
+    fprintf(stderr, "\nOutput:\n");
+    fprintf(stderr, "  Video mode creates: media.m3u8, init.mp4, media-seg-*.m4s\n");
+    fprintf(stderr, "  Play with: vlc media.m3u8 or ffplay media.m3u8\n");
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
+    if (argc < 4) {
         print_usage(argv[0]);
-        return 1;
+        return 0;
     }
 
     const char* mode = argv[1];
@@ -68,7 +85,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(mode, "video") == 0) {
         enable_audio = 1;
         enable_video = 1;
-        mode_name = "Audio + Shared Screens";
+        mode_name = "Audio + HLS Video (Shared Screens)";
     } else {
         fprintf(stderr, "Error: Invalid mode '%s'\n\n", mode);
         print_usage(argv[0]);
@@ -121,8 +138,21 @@ int main(int argc, char *argv[]) {
     }
     
     if (enable_video) {
-        zoom_meeting_set_video_callback(meeting, video_callback);
-        printf("Video callback registered (shared screens)\n");
+        // Configure HLS encoder/muxer
+        ZoomHlsVideoConfig config = {
+            .width = 0,              // Auto-detect from incoming frames
+            .height = 0,             // Auto-detect from incoming frames
+            .fps = 30,               // 30 FPS
+            .bitrate_kbps = 2500,    // 2.5 Mbps
+            .gop_seconds = 2,        // 2-second keyframe interval
+            .segment_seconds = 2,    // 2-second HLS segments
+            .encoder = "auto",       // Try nvenc, fall back to x264
+            .preset = "veryfast",    // Fast encoding
+            .hls_prefix = "media"    // Output: media.m3u8, media-seg-*.m4s
+        };
+        zoom_meeting_set_hls_video_callback(meeting, hls_file_callback, &config);
+        printf("HLS video callback registered (shared screens -> fMP4)\n");
+        printf("Output files: media.m3u8, init.mp4, media-seg-*.m4s\n");
     }
 
     printf("\nRecording active. Press Ctrl+C to stop.\n");
@@ -137,6 +167,12 @@ int main(int argc, char *argv[]) {
     zoom_meeting_destroy(meeting);
     zoom_sdk_destroy(sdk);
     printf("Done!\n");
+    
+    if (enable_video) {
+        printf("\nTo play the recording:\n");
+        printf("  vlc media.m3u8\n");
+        printf("  ffplay media.m3u8\n");
+    }
 
     return 0;
 }

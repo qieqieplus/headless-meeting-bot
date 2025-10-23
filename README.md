@@ -8,7 +8,7 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 
 **核心功能：**
 - 实时音频采集（混音、单路、共享音频）
-- 屏幕共享内容采集（YUV I420 格式）（开发中）
+- 屏幕共享内容采集（H.264 编码输出）
 - WebSocket 实时音频流分发
 - RESTful API 会议管理
 - 多会议并发支持
@@ -37,6 +37,7 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 │  • zoom_sdk_create()                                        │
 │  • zoom_meeting_create_and_join()                           │
 │  • zoom_meeting_set_audio_callback()                        │
+│  • zoom_meeting_set_video_callback() (H.264 encoded)        │
 │  • zoom_sdk_run_loop()                                      │
 └─────────────────────┬───────────────────────────────────────┘
                       │
@@ -46,7 +47,8 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 │  • ZoomSDK (SDK 初始化与认证)                                 │
 │  • Meeting (会议管理与事件处理)                                │
 │  • AudioDelegate (音频数据回调)                               │
-│  • VideoDelegate (视频数据回调)                               │
+│  • VideoDelegate (视频数据回调 + H.264 编码)                   │
+│  • VideoEncodePipeline (x264 编码管道)                        │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -376,7 +378,7 @@ Frame Structure:
 - 考虑使用 shared memory 降低 IPC 延迟
 - Audio Bus 放在主进程，避免数据拷贝
 
-#### 2.4.4 视频数据量 (WIP)
+#### 2.4.4 视频数据处理
 
 **数据量估算：**
 - 1080p YUV420: 1920×1080×1.5 ≈ 3MB/frame
@@ -386,11 +388,13 @@ Frame Structure:
 **当前设计：**
 - 仅捕获屏幕共享（按需订阅）
 - 不捕获摄像头视频（降低资源消耗）
-- 视频数据由应用层自行压缩（H.264/VP8）
+- 视频数据自动 H.264 编码（x264 veryfast preset）
+- 编码后数据量：~1.5Mbps @ 1080p30 (约 99% 压缩率)
 
-**限制：**
-- WebSocket 不适合传输原始视频
-- 建议使用本地存储或外部转码服务
+**编码配置：**
+- 默认配置：30fps, veryfast preset
+- 支持自定义：width/height/fps/threads/preset
+- Annex B 格式输出，兼容 WebRTC/HLS/RTMP
 
 ---
 
@@ -478,6 +482,13 @@ void on_audio(MeetingHandle meeting, const void* data, int length,
     printf("Audio: type=%d, user=%u, len=%d\n", type, user_id, length);
 }
 
+// H.264 编码视频回调
+void on_video(MeetingHandle meeting, const unsigned char* annexb_au,
+              int au_len, int is_keyframe, unsigned long long timestamp) {
+    // 处理 H.264 Annex B 访问单元
+    printf("Video: len=%d, keyframe=%d, ts=%llu\n", au_len, is_keyframe, timestamp);
+}
+
 int main() {
     // 1. 创建 SDK
     ZoomSDKHandle sdk = zoom_sdk_create(
@@ -493,16 +504,29 @@ int main() {
         "My Bot",            // display_name
         NULL,                // join_token
         1,                   // enable_audio
-        0                    // enable_video
+        1                    // enable_video (H.264 encoded)
     );
     
-    // 3. 设置回调
+    // 3. 设置音频回调
     zoom_meeting_set_audio_callback(meeting, on_audio);
     
-    // 4. 运行事件循环
+    // 4. 设置视频回调（可选配置编码参数）
+    ZoomVideoEncodeParams video_params = {
+        .width = 0,          // 自动检测
+        .height = 0,         // 自动检测
+        .fps = 30,           // 30 FPS
+        .threads = 0,        // 自动
+        .preset = "veryfast" // 快速编码
+    };
+    zoom_meeting_set_video_callback(meeting, on_video, &video_params);
+    
+    // 或者使用默认参数：
+    // zoom_meeting_set_video_callback(meeting, on_video, NULL);
+    
+    // 5. 运行事件循环
     zoom_sdk_run_loop();  // 阻塞直到收到信号
     
-    // 5. 清理
+    // 6. 清理
     zoom_meeting_destroy(meeting);
     zoom_sdk_destroy(sdk);
     
@@ -787,7 +811,8 @@ services:
 | `zoom_meeting_destroy(handle)` | 离开并销毁会议 |
 | `zoom_meeting_get_status(handle)` | 获取会议状态 |
 | `zoom_meeting_set_audio_callback(handle, cb)` | 设置音频回调 |
-| `zoom_meeting_set_video_callback(handle, cb)` | 设置视频回调 |
+| `zoom_meeting_set_video_callback(handle, cb, params)` | 设置 H.264 编码视频回调 |
+| `zoom_meeting_video_encoder_request_idr(handle)` | 请求关键帧 |
 | `zoom_sdk_run_loop()` | 运行事件循环 |
 | `zoom_sdk_stop_loop()` | 停止事件循环 |
 

@@ -1,4 +1,5 @@
 #include "zoom_sdk_audio_delegate.h"
+#include "zoom_sdk_internal.h"
 
 void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data) {
     if (!data) return;

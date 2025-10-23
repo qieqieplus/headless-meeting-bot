@@ -5,14 +5,13 @@ package zoomsdk
 #include "zoom_sdk_c.h"
 
 // Forward declaration for Go callback
-extern void goOnAudioDataReceived(MeetingHandle meeting_handle, void* data, int length, int type, unsigned int node_id);
+extern void OnAudioDataReceived(MeetingHandle meeting_handle, void* data, int length, int type, unsigned int node_id);
 
-// C wrapper function that will be passed to zoom_meeting_set_audio_callback
+// C wrapper function
 static void cAudioCallback(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id) {
-    goOnAudioDataReceived(meeting_handle, (void*)data, length, type, node_id);
+    OnAudioDataReceived(meeting_handle, (void*)data, length, type, node_id);
 }
 
-// Helper function to get the C callback function pointer
 static OnAudioDataReceivedCallback getCCallbackPtr() {
     return cAudioCallback;
 }
@@ -204,8 +203,8 @@ func StopLoop() {
 	C.zoom_sdk_stop_loop()
 }
 
-//export goOnAudioDataReceived
-func goOnAudioDataReceived(meetingHandle C.MeetingHandle, data unsafe.Pointer, length C.int, audioType C.int, nodeID C.uint) {
+//export OnAudioDataReceived
+func OnAudioDataReceived(meetingHandle C.MeetingHandle, data unsafe.Pointer, length C.int, audioType C.int, nodeID C.uint) {
 	instance := getMeetingInstance(meetingHandle)
 	if instance == nil {
 		log.Warnf("Received audio data for unknown meeting handle: %p", meetingHandle)

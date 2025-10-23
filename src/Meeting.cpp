@@ -3,6 +3,7 @@
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 using namespace ZOOMSDK;
 
@@ -14,7 +15,6 @@ Meeting::Meeting(const MeetingConfig& config, IMeetingService* meetingService, I
     , m_audioSource(nullptr)
     , m_isJoined(false)
     , m_isRecording(false)
-    , m_currentShareSourceId(0)
     , m_shareSubscribed(false)
     , m_meetingService(meetingService)
     , m_settingService(settingService) {
@@ -280,18 +280,7 @@ SDKError Meeting::startRawRecording() {
         if (!m_audioHelper)
             return SDKERR_UNINITIALIZE;
 
-        // Audio join may still be in progress, retry with delays
-        int retries = 10; // 10 retries with 500ms each = 5 seconds max
-        err = SDKERR_NOT_JOIN_AUDIO;
-        while (retries > 0 && err == SDKERR_NOT_JOIN_AUDIO) {
-            err = m_audioHelper->subscribe(m_audioSource);
-            if (err == SDKERR_NOT_JOIN_AUDIO) {
-                Util::Logger::getInstance().info("Audio not yet joined, waiting... (" + std::to_string(retries) + " retries left)");
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                retries--;
-            }
-        }
-        
+        m_audioHelper->subscribe(m_audioSource);
         if (hasError(err, "subscribe to raw audio"))
             return err;
     }
@@ -318,9 +307,9 @@ SDKError Meeting::stopRawRecording() {
         m_videoHelper->unSubscribe();
         destroyRenderer(m_videoHelper);
         m_videoHelper = nullptr;
-        m_shareSubscribed = false;
-        m_currentShareSourceId = 0;
     }
+    m_shareSubscribed = false;
+    m_shareSourceIds.clear();
     
     m_isRecording = false;
     return err;
@@ -368,34 +357,64 @@ bool Meeting::hasError(const SDKError e, const std::string& action) {
 }
 
 void Meeting::subscribeShare(const ZoomSDKSharingSourceInfo& shareInfo) {
-     // Only subscribe to primary view
-    if (!m_videoHelper || !shareInfo.isShowingInFirstView) {
+    if (shareInfo.contentType != SHARE_TYPE_DATA) {
         return;
     }
 
-    // Unsubscribe from existing share if any
-    if (m_shareSubscribed) {
-        m_videoHelper->unSubscribe();
-        m_currentShareSourceId = 0;
-        m_shareSubscribed = false;
+    const unsigned int sourceId = shareInfo.shareSourceID;
+    auto it = std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
+    if (it != m_shareSourceIds.end()) {
+        m_shareSourceIds.erase(it);
     }
+    m_shareSourceIds.push_back(sourceId);
 
-    auto err = m_videoHelper->subscribe(shareInfo.shareSourceID, RAW_DATA_TYPE_SHARE);
-    if (hasError(err, "subscribe to share source " + std::to_string(shareInfo.shareSourceID))) {
-        return;
-    }
-
-    m_currentShareSourceId = shareInfo.shareSourceID;
-    m_shareSubscribed = true;
-    Util::Logger::getInstance().success("Subscribed to share source " + std::to_string(shareInfo.shareSourceID));
+    subscribeTopShare();
 }
 
 void Meeting::unSubscribeShare(const ZoomSDKSharingSourceInfo& shareInfo) {
-    // Unsubscribe if this is the share we're currently subscribed to
-    if (m_videoHelper && m_shareSubscribed && m_currentShareSourceId == shareInfo.shareSourceID) {
+    const unsigned int sourceId = shareInfo.shareSourceID;
+    const bool wasTop = !m_shareSourceIds.empty() && m_shareSourceIds.back() == sourceId;
+
+    auto it = std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
+    if (it == m_shareSourceIds.end()) {
+        return; // Not tracked
+    }
+    m_shareSourceIds.erase(it);
+
+    if (wasTop) {
+        if (m_shareSubscribed && m_videoHelper) {
+            m_videoHelper->unSubscribe();
+            m_shareSubscribed = false;
+            Util::Logger::getInstance().success("Unsubscribed from share source " + std::to_string(sourceId));
+        }
+        subscribeTopShare();
+    }
+}
+
+void Meeting::subscribeTopShare() {
+    if (!m_videoHelper) return;
+
+    if (m_shareSourceIds.empty()) {
+        if (m_shareSubscribed) {
+            m_videoHelper->unSubscribe();
+            m_shareSubscribed = false;
+            Util::Logger::getInstance().success("Unsubscribed from share (no active sources)");
+        }
+        return;
+    }
+
+    const unsigned int newTop = m_shareSourceIds.back();
+
+    if (m_shareSubscribed) {
         m_videoHelper->unSubscribe();
-        Util::Logger::getInstance().success("Unsubscribed from share source " + std::to_string(m_currentShareSourceId));
-        m_currentShareSourceId = 0;
         m_shareSubscribed = false;
     }
+
+    auto err = m_videoHelper->subscribe(newTop, RAW_DATA_TYPE_SHARE);
+    if (hasError(err, "subscribe to share source " + std::to_string(newTop))) {
+        return;
+    }
+
+    m_shareSubscribed = true;
+    Util::Logger::getInstance().success("Subscribed to share source " + std::to_string(newTop));
 }
