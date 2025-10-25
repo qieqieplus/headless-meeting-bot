@@ -1,6 +1,9 @@
 #ifndef ZOOM_SDK_C_API_H
 #define ZOOM_SDK_C_API_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -69,7 +69,6 @@ public:
     ZOOMSDK::INetworkConnectionHelper* getNetworkHelper() const { return m_networkHelper; }
     ZOOMSDK::IMeetingService* getMeetingService() const { return m_meetingService; }
         
-    // Utility methods
     static bool hasError(ZOOMSDK::SDKError e, const std::string& action="");
 };
 

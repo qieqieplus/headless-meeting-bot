@@ -10,6 +10,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
+
+// Global flag for graceful shutdown
+volatile sig_atomic_t should_exit = 0;
+
+// Signal handler for graceful shutdown
+void signal_handler(int signum) {
+    printf("\n[INFO] Received signal %d, initiating graceful shutdown...\n", signum);
+    should_exit = 1;
+    zoom_sdk_stop_loop();
+}
 
 // Audio callback
 void audio_callback(MeetingHandle meeting_handle, const void* data, int length, int type, unsigned int node_id) {
@@ -108,6 +120,9 @@ int main(int argc, char *argv[]) {
     printf("Meeting:    %s\n", meeting_id);
     printf("Join Token: %s\n\n", join_token ? join_token : "(none)");
 
+    // Set up signal handler for graceful shutdown
+    signal(SIGINT, signal_handler);
+
     // Create SDK
     printf("Creating SDK...\n");
     ZoomSDKHandle sdk = zoom_sdk_create(sdk_key, sdk_secret);
@@ -142,11 +157,11 @@ int main(int argc, char *argv[]) {
         ZoomHlsVideoConfig config = {
             .width = 0,              // Auto-detect from incoming frames
             .height = 0,             // Auto-detect from incoming frames
-            .fps = 30,               // 30 FPS
+            .fps = 0,               // 30 FPS
             .bitrate_kbps = 2500,    // 2.5 Mbps
             .gop_seconds = 2,        // 2-second keyframe interval
-            .segment_seconds = 2,    // 2-second HLS segments
-            .encoder = "auto",       // Try nvenc, fall back to x264
+            .segment_seconds = 30,    // 30-second HLS segments
+            .encoder = "x264",       // Try nvenc, fall back to x264
             .preset = "veryfast",    // Fast encoding
             .hls_prefix = "media"    // Output: media.m3u8, media-seg-*.m4s
         };
@@ -155,7 +170,7 @@ int main(int argc, char *argv[]) {
         printf("Output files: media.m3u8, init.mp4, media-seg-*.m4s\n");
     }
 
-    printf("\nRecording active. Press Ctrl+C to stop.\n");
+    printf("\nRecording active. Press Ctrl+C to stop gracefully.\n");
     printf("-------------------------------------------\n");
 
     // Run event loop
@@ -163,10 +178,14 @@ int main(int argc, char *argv[]) {
 
     // Cleanup
     printf("\n-------------------------------------------\n");
-    printf("Cleaning up...\n");
+    if (should_exit) {
+        printf("Graceful shutdown initiated. Cleaning up resources...\n");
+    } else {
+        printf("Recording stopped. Cleaning up...\n");
+    }
     zoom_meeting_destroy(meeting);
     zoom_sdk_destroy(sdk);
-    printf("Done!\n");
+    printf("Cleanup complete!\n");
     
     if (enable_video) {
         printf("\nTo play the recording:\n");
@@ -174,5 +193,8 @@ int main(int argc, char *argv[]) {
         printf("  ffplay media.m3u8\n");
     }
 
-    return 0;
+    // Force immediate exit to avoid hanging on Zoom SDK internal threads
+    // The SDK doesn't always properly clean up all background threads on Linux
+    // Use _exit() instead of exit() to bypass atexit handlers that might block
+    _exit(0);
 }

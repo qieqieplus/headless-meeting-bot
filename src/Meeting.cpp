@@ -1,5 +1,6 @@
 #include "Meeting.h"
 #include "util/Logger.h"
+#include "util/Checks.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -9,15 +10,11 @@ using namespace ZOOMSDK;
 
 Meeting::Meeting(const MeetingConfig& config, IMeetingService* meetingService, ISettingService* settingService)
     : m_config(config)
-    , m_videoHelper(nullptr)
-    , m_videoSource(nullptr)
-    , m_audioHelper(nullptr)
-    , m_audioSource(nullptr)
     , m_isJoined(false)
     , m_isRecording(false)
-    , m_shareSubscribed(false)
     , m_meetingService(meetingService)
-    , m_settingService(settingService) {
+    , m_settingService(settingService)
+    , m_mediaController(std::make_unique<MediaController>()) {
 
     if (!m_meetingService || !m_settingService) {
         Util::Logger::getInstance().error("Services must be provided to create a Meeting");
@@ -28,38 +25,30 @@ Meeting::Meeting(const MeetingConfig& config, IMeetingService* meetingService, I
 }
 
 Meeting::~Meeting() {
-    if (m_audioHelper) {
-        m_audioHelper->unSubscribe();
+    if (m_isJoined) {
+        leave();
     }
-
-    if (m_videoHelper) {
-        m_videoHelper->unSubscribe();
-        destroyRenderer(m_videoHelper);
-        m_videoHelper = nullptr;
-    }
-
     // Unset events before destruction to avoid dangling pointers in SDK
-    if (m_meetingService && m_meetingServiceEvent) {
+    if (!m_meetingService) {
+        return;
+    }
+    if (m_meetingServiceEvent) {
         m_meetingService->SetEvent(nullptr);
     }
 
-    auto* reminderController = m_meetingService ? m_meetingService->GetMeetingReminderController() : nullptr;
+    auto* reminderController = m_meetingService->GetMeetingReminderController();
     if (reminderController && m_reminderEvent) {
         reminderController->SetEvent(nullptr);
     }
 
-    auto* recordingCtrl = m_meetingService ? m_meetingService->GetMeetingRecordingController() : nullptr;
+    auto* recordingCtrl = m_meetingService->GetMeetingRecordingController();
     if (recordingCtrl && m_recordingEvent) {
         recordingCtrl->SetEvent(nullptr);
     }
 
-    auto* shareCtrl = m_meetingService ? m_meetingService->GetMeetingShareController() : nullptr;
+    auto* shareCtrl = m_meetingService->GetMeetingShareController();
     if (shareCtrl && m_shareEvent) {
         shareCtrl->SetEvent(nullptr);
-    }
-
-    if (m_isJoined) {
-        leave();
     }
 }
 
@@ -71,20 +60,18 @@ SDKError Meeting::setupMeetingEvents() {
 
         // mute the bot video & audio by default
         auto* participantsCtrl = m_meetingService->GetMeetingParticipantsController();
-        if (participantsCtrl) {
-            if (auto* botUser = participantsCtrl->GetMySelfUser()) {
-                
-                if (auto* audioCtrl = m_meetingService->GetMeetingAudioController()) {
-                    audioCtrl->MuteAudio(botUser->GetUserID());
-                    // a workaround to join audio
-                    // https://devforum.zoom.us/t/cant-record-audio-with-linux-meetingsdk-after-6-3-5-6495-error-code-32/130689/10
-                    audioCtrl->JoinVoip();
-                }
+        ASSERT_NOT_NULL(participantsCtrl);
+        if (auto* botUser = participantsCtrl->GetMySelfUser()) {
+            auto* audioCtrl = m_meetingService->GetMeetingAudioController();
+            ASSERT_NOT_NULL(audioCtrl);
+            audioCtrl->MuteAudio(botUser->GetUserID());
+            // a workaround to join audio
+            // https://devforum.zoom.us/t/cant-record-audio-with-linux-meetingsdk-after-6-3-5-6495-error-code-32/130689/10
+            audioCtrl->JoinVoip();
 
-                if (auto* videoCtrl = m_meetingService->GetMeetingVideoController()) {
-                    videoCtrl->MuteVideo();
-                }
-            }
+            auto* videoCtrl = m_meetingService->GetMeetingVideoController();
+            ASSERT_NOT_NULL(videoCtrl);
+            videoCtrl->MuteVideo();
         }
         
 
@@ -95,26 +82,22 @@ SDKError Meeting::setupMeetingEvents() {
         }
 
         // Setup share event if we're capturing video (which is always share)
-        if (m_config.useRawVideo()) {
+        if (m_config.useRawVideo() && m_mediaController) {
             auto* shareCtrl = m_meetingService->GetMeetingShareController();
-            if (shareCtrl) {
-                auto onShareStart = [this](const ZoomSDKSharingSourceInfo& info) {
-                    subscribeShare(info);
-                };
-                auto onShareEnd = [this](const ZoomSDKSharingSourceInfo& info) {
-                    unSubscribeShare(info);
-                };
-                m_shareEvent = std::make_unique<MeetingShareEvent>(onShareStart, onShareEnd);
-                shareCtrl->SetEvent(m_shareEvent.get());
-            }
+            ASSERT_NOT_NULL(shareCtrl);
+            auto onShareStart = [this](const ZoomSDKSharingSourceInfo& info) {
+                m_mediaController->onShareStart(info);
+            };
+            auto onShareEnd = [this](const ZoomSDKSharingSourceInfo& info) {
+                m_mediaController->onShareEnd(info);
+            };
+            m_shareEvent = std::make_unique<MeetingShareEvent>(onShareStart, onShareEnd);
+            shareCtrl->SetEvent(m_shareEvent.get());
         }
 
         if (m_config.useRawRecording()) {
             auto recordingCtrl = m_meetingService->GetMeetingRecordingController();
-            if (!recordingCtrl) {
-                Util::Logger::getInstance().error("Recording controller not available");
-                return;
-            }
+            ASSERT_NOT_NULL(recordingCtrl);
 
             std::function<void(bool)> onRecordingPrivilegeChanged = [this](bool canRec) {
                 if (canRec)
@@ -147,16 +130,14 @@ SDKError Meeting::setupMeetingEvents() {
 }
 
 SDKError Meeting::join() {
-    if (!m_meetingService) {
-        return SDKERR_UNINITIALIZE;
-    }
+    ASSERT_NOT_NULL(m_meetingService);
     
     auto id = m_config.meetingId();
     auto password = m_config.password();
     auto displayName = m_config.displayName();
 
     if (id.empty() || password.empty()) {
-        Util::Logger::getInstance().error("you must provide an id and password to join a meeting");
+        Util::Logger::getInstance().error("You must provide an id and password to join a meeting");
         return SDKERR_INVALID_PARAMETER;
     }
 
@@ -183,8 +164,7 @@ SDKError Meeting::join() {
 
     if (m_config.useRawAudio()) {
         auto* audioSettings = m_settingService->GetAudioSettings();
-        if (!audioSettings) return SDKERR_INTERNAL_ERROR;
-
+        ASSERT_NOT_NULL(audioSettings);
         audioSettings->EnableAutoJoinAudio(true);
     }
 
@@ -192,9 +172,7 @@ SDKError Meeting::join() {
 }
 
 SDKError Meeting::start() {
-    if (!m_meetingService) {
-        return SDKERR_UNINITIALIZE;
-    }
+    ASSERT_NOT_NULL(m_meetingService);
     
     StartParam startParam;
     startParam.userType = SDK_UT_NORMALUSER;
@@ -206,15 +184,12 @@ SDKError Meeting::start() {
     normalUser.isAudioOff = false;
     startParam.param.normaluserStart = normalUser;
 
-    SDKError err = m_meetingService->Start(startParam);
-    hasError(err, "start meeting");
-
-    return err;
+    ZOOM_ERR_CHECK(m_meetingService->Start(startParam), "start meeting");
+    return SDKERR_SUCCESS;
 }
 
 SDKError Meeting::leave() {
-    if (!m_meetingService)
-        return SDKERR_UNINITIALIZE;
+    ASSERT_NOT_NULL(m_meetingService);
 
     if (m_isRecording) {
         stopRawRecording();
@@ -231,58 +206,46 @@ SDKError Meeting::startOrJoin() {
 }
 
 SDKError Meeting::startRawRecording() {
-    if (!m_meetingService) {
-        return SDKERR_UNINITIALIZE;
-    }
+    ASSERT_NOT_NULL(m_meetingService);
 
     if (m_isRecording) {
         return SDKERR_SUCCESS;
     }
 
-    SDKError err;
-
     auto recCtrl = m_meetingService->GetMeetingRecordingController();
-    err = recCtrl->StartRawRecording();
-    if (hasError(err, "start raw recording"))
-        return err;
+    ASSERT_NOT_NULL(recCtrl);
+    
+    ZOOM_ERR_CHECK(recCtrl->StartRawRecording(), "start raw recording");
 
-    if (m_config.useRawVideo()) {
-        // Video always means shared screen content
-        if (!m_videoSource) {
-            Util::Logger::getInstance().error("Video source delegate not set");
-            return SDKERR_UNINITIALIZE;
-        }
-
-        err = createRenderer(&m_videoHelper, m_videoSource);
-        if (hasError(err, "create renderer"))
-            return err;
-
-        m_videoHelper->setRawDataResolution(ZoomSDKResolution_720P);
-
-        // Check if there's already an active share to subscribe to
-        if (auto* shareCtrl = m_meetingService->GetMeetingShareController()) {
+    // Delegate audio/video subscription to MediaController
+    if (m_mediaController) {
+        // Get current active shares to pass to MediaController
+        std::vector<ZOOMSDK::ZoomSDKSharingSourceInfo> currentShares;
+        auto* shareCtrl = m_meetingService->GetMeetingShareController();
+        if (shareCtrl) {
             if (auto* sharers = shareCtrl->GetViewableSharingUserList()) {
                 for (int i = 0; i < sharers->GetCount(); i++) {
                     unsigned int userId = sharers->GetItem(i);
                     auto* shareList = shareCtrl->GetSharingSourceInfoList(userId);
                     if (shareList) {
                         for (int j = 0; j < shareList->GetCount(); j++) {
-                            subscribeShare(shareList->GetItem(j));
+                            currentShares.push_back(shareList->GetItem(j));
                         }
                     }
                 }
             }
         }
-    }
 
-    if (m_config.useRawAudio() && m_audioSource) {
-        m_audioHelper = GetAudioRawdataHelper();
-        if (!m_audioHelper)
-            return SDKERR_UNINITIALIZE;
-
-        m_audioHelper->subscribe(m_audioSource);
-        if (hasError(err, "subscribe to raw audio"))
-            return err;
+        auto mediaErr = m_mediaController->startMedia(
+            m_config.useRawAudio(),
+            m_config.useRawVideo(),
+            currentShares
+        );
+        if (mediaErr != SDKERR_SUCCESS) {
+            recCtrl->StopRawRecording();
+            Util::Logger::getInstance().error("failed to start media recording with status " + std::to_string(mediaErr));
+            return mediaErr;
+        }
     }
     
     m_isRecording = true;
@@ -290,29 +253,20 @@ SDKError Meeting::startRawRecording() {
 }
 
 SDKError Meeting::stopRawRecording() {
-    if (!m_meetingService) return SDKERR_UNINITIALIZE;
+    ASSERT_NOT_NULL(m_meetingService);
     if (!m_isRecording) return SDKERR_SUCCESS;
 
-    auto recCtrl = m_meetingService->GetMeetingRecordingController();
-    if (!recCtrl) return SDKERR_UNINITIALIZE;
-
-    auto err = recCtrl->StopRawRecording();
-    hasError(err, "stop raw recording");
-    
-    if (m_audioHelper) {
-        m_audioHelper->unSubscribe();
-    }
-    
-    if (m_videoHelper) {
-        m_videoHelper->unSubscribe();
-        destroyRenderer(m_videoHelper);
-        m_videoHelper = nullptr;
-    }
-    m_shareSubscribed = false;
-    m_shareSourceIds.clear();
-    
     m_isRecording = false;
-    return err;
+
+    // Delegate audio/video cleanup to MediaController
+    if (m_mediaController) {
+        m_mediaController->stopMedia();
+    }
+
+    auto recCtrl = m_meetingService->GetMeetingRecordingController();
+    ASSERT_NOT_NULL(recCtrl);
+
+    return recCtrl->StopRawRecording();
 }
 
 bool Meeting::isMeetingStart() const {
@@ -354,67 +308,4 @@ bool Meeting::hasError(const SDKError e, const std::string& action) {
         }
     }
     return isError;
-}
-
-void Meeting::subscribeShare(const ZoomSDKSharingSourceInfo& shareInfo) {
-    if (shareInfo.contentType != SHARE_TYPE_DATA) {
-        return;
-    }
-
-    const unsigned int sourceId = shareInfo.shareSourceID;
-    auto it = std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
-    if (it != m_shareSourceIds.end()) {
-        m_shareSourceIds.erase(it);
-    }
-    m_shareSourceIds.push_back(sourceId);
-
-    subscribeTopShare();
-}
-
-void Meeting::unSubscribeShare(const ZoomSDKSharingSourceInfo& shareInfo) {
-    const unsigned int sourceId = shareInfo.shareSourceID;
-    const bool wasTop = !m_shareSourceIds.empty() && m_shareSourceIds.back() == sourceId;
-
-    auto it = std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
-    if (it == m_shareSourceIds.end()) {
-        return; // Not tracked
-    }
-    m_shareSourceIds.erase(it);
-
-    if (wasTop) {
-        if (m_shareSubscribed && m_videoHelper) {
-            m_videoHelper->unSubscribe();
-            m_shareSubscribed = false;
-            Util::Logger::getInstance().success("Unsubscribed from share source " + std::to_string(sourceId));
-        }
-        subscribeTopShare();
-    }
-}
-
-void Meeting::subscribeTopShare() {
-    if (!m_videoHelper) return;
-
-    if (m_shareSourceIds.empty()) {
-        if (m_shareSubscribed) {
-            m_videoHelper->unSubscribe();
-            m_shareSubscribed = false;
-            Util::Logger::getInstance().success("Unsubscribed from share (no active sources)");
-        }
-        return;
-    }
-
-    const unsigned int newTop = m_shareSourceIds.back();
-
-    if (m_shareSubscribed) {
-        m_videoHelper->unSubscribe();
-        m_shareSubscribed = false;
-    }
-
-    auto err = m_videoHelper->subscribe(newTop, RAW_DATA_TYPE_SHARE);
-    if (hasError(err, "subscribe to share source " + std::to_string(newTop))) {
-        return;
-    }
-
-    m_shareSubscribed = true;
-    Util::Logger::getInstance().success("Subscribed to share source " + std::to_string(newTop));
 }

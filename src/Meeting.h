@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "MeetingConfig.h"
+#include "MediaController.h"
 
 // SDK interfaces needed by implementation
 #include "meeting_service_interface.h"
@@ -28,17 +29,14 @@
 #include "events/MeetingRecordingCtrlEvent.h"
 #include "events/MeetingShareEvent.h"
 
+// Forward declarations
+struct FFmpegEncoderConfig;
+struct HlsMuxerConfig;
 
 class Meeting {
 
+private:
     MeetingConfig m_config;
-
-    ZOOMSDK::IZoomSDKAudioRawDataHelper* m_audioHelper;
-    ZOOMSDK::IZoomSDKAudioRawDataDelegate* m_audioSource;
-
-    // Video support
-    ZOOMSDK::IZoomSDKRenderer* m_videoHelper;
-    ZOOMSDK::IZoomSDKRendererDelegate* m_videoSource;
 
     bool m_isJoined;
     bool m_isRecording;
@@ -53,14 +51,10 @@ class Meeting {
     std::unique_ptr<MeetingServiceEvent> m_meetingServiceEvent;
     std::unique_ptr<MeetingShareEvent> m_shareEvent;
 
-    // Share tracking (most-recent share on top)
-    std::vector<unsigned int> m_shareSourceIds;
-    bool m_shareSubscribed;
+    // Media controller (encapsulates all audio/video handling)
+    std::unique_ptr<MediaController> m_mediaController;
 
     ZOOMSDK::SDKError setupMeetingEvents();
-    void subscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
-    void unSubscribeShare(const ZOOMSDK::ZoomSDKSharingSourceInfo& shareInfo);
-    void subscribeTopShare();
 
 public:
     Meeting(const MeetingConfig& config, ZOOMSDK::IMeetingService* meetingService, ZOOMSDK::ISettingService* settingService);
@@ -81,11 +75,8 @@ public:
     const MeetingConfig& getConfig() const { return m_config; }
     ZOOMSDK::IMeetingService* getMeetingService() const { return m_meetingService; }
 
-    void setAudioSource(ZOOMSDK::IZoomSDKAudioRawDataDelegate* source) { m_audioSource = source; }
-    ZOOMSDK::IZoomSDKAudioRawDataDelegate* getAudioSource() const { return m_audioSource; }
-    
-    void setVideoSource(ZOOMSDK::IZoomSDKRendererDelegate* source) { m_videoSource = source; }
-    ZOOMSDK::IZoomSDKRendererDelegate* getVideoSource() const { return m_videoSource; }
+    // Media controller access (for C API routing and delegate setup)
+    MediaController* getMediaController() { return m_mediaController.get(); }
 
     // Static factory methods
     static Meeting* createMeeting(const MeetingConfig& meetingConfig, ZOOMSDK::IMeetingService* meetingService, ZOOMSDK::ISettingService* settingService);

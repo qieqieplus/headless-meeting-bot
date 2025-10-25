@@ -18,7 +18,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
 pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
-pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+# pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
 
 find_package(OpenSSL REQUIRED)
 
@@ -48,6 +48,8 @@ add_library(zoomsdk_c SHARED
         ZoomSDK.h
         Meeting.cpp
         Meeting.h
+        MediaController.cpp
+        MediaController.h
         SDKConfig.cpp
         SDKConfig.h
         MeetingConfig.cpp
@@ -72,7 +74,7 @@ target_link_libraries(zoomsdk_c PRIVATE
     PkgConfig::AVCODEC
     PkgConfig::AVFORMAT
     PkgConfig::AVUTIL
-    PkgConfig::SWSCALE
+    # PkgConfig::SWSCALE
 )
 
 # Set output names for shared libraries

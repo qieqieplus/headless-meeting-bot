@@ -44,6 +44,7 @@ private:
         std::vector<uint8_t> data;
         std::string filename;
         uint64_t sequence = 0;
+        size_t position = 0; // current write/seek position
     };
 
     // Static trampolines for FFmpeg callbacks
@@ -57,6 +58,8 @@ private:
 
     // AVIO write callback
     static int writePacket(void* opaque, uint8_t* buf, int buf_size);
+    // AVIO seek callback
+    static int64_t seek(void* opaque, int64_t offset, int whence);
 
 private:
     HlsFileCallback fileCallback;
@@ -65,4 +68,3 @@ private:
     std::unordered_map<AVIOContext*, std::shared_ptr<FileBuffer>> activeBuffers;
     uint64_t segmentSequence = 0;
 };
-

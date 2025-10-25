@@ -74,7 +74,6 @@ bool VideoEncodePipeline::ensureEncoder(unsigned int w, unsigned int h) {
 		return true;
 	}
 
-	// Initialize encoder if not yet done
 	if (encoder.getWidth() == 0) {
 		FFmpegEncoderConfig cfg = encoderCfg;
 		cfg.width = static_cast<int>(w);
@@ -99,6 +98,7 @@ bool VideoEncodePipeline::ensureEncoder(unsigned int w, unsigned int h) {
 		AVCodecContext* codecCtx = encoder.getCodecContext();
 		if (codecParams && codecCtx) {
 			avcodec_parameters_from_context(codecParams, codecCtx);
+			codecParams->format = codecCtx->pix_fmt;
 		}
 
 		if (!muxer.start()) {
@@ -148,7 +148,6 @@ void VideoEncodePipeline::workerLoop() {
 			Util::Logger::getInstance().error("Failed to write packet to HLS muxer");
 		}
 	}
-	
-	// Finalize HLS on stop
-	muxer.finalize();
+
+	Util::Logger::getInstance().info("VideoEncodePipeline worker loop exited");
 }

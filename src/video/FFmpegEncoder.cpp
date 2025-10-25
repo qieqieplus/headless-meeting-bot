@@ -23,30 +23,23 @@ void FFmpegEncoder::shutdown() {
     closeEncoder();
 }
 
-const AVCodec* FFmpegEncoder::selectCodec(const std::string& encoderName) {
+const AVCodec* FFmpegEncoder::selectCodec(const std::string& encoder) {
     const AVCodec* codec = nullptr;
-    
-    if (encoderName == "nvenc") {
+
+    if (encoder == "nvenc") {
         codec = avcodec_find_encoder_by_name("h264_nvenc");
-        if (!codec) {
-            Util::Logger::getInstance().warn("h264_nvenc not available, falling back to libx264");
-        }
-    } else if (encoderName == "x264") {
-        codec = avcodec_find_encoder_by_name("libx264");
-    } else { // "auto"
-        // Try nvenc first, fall back to x264
-        codec = avcodec_find_encoder_by_name("h264_nvenc");
-        if (!codec) {
-            codec = avcodec_find_encoder_by_name("libx264");
-        }
     }
-    
+
     if (!codec) {
-        Util::Logger::getInstance().error("No H.264 encoder available");
-        return nullptr;
+        codec = avcodec_find_encoder_by_name("libx264");
     }
-    
-    Util::Logger::getInstance().info(std::string("Selected encoder: ") + codec->name);
+
+    if (codec) {
+        Util::Logger::getInstance().info(std::string("Encoder: ") + codec->name);
+    } else {
+        Util::Logger::getInstance().error("No H.264 encoder available");
+    }
+
     return codec;
 }
 
@@ -60,7 +53,7 @@ bool FFmpegEncoder::configureEncoder(AVCodecContext* ctx, const AVCodec* codec) 
     ctx->gop_size = currentConfig.fps * currentConfig.gopSeconds;
     ctx->max_b_frames = 0; // No B-frames for low latency
     
-    bool isNvenc = (std::string(codec->name).find("nvenc") != std::string::npos);
+    bool isNvenc = (strstr(codec->name, "nvenc") != nullptr);
     
     if (isNvenc) {
         // NVENC-specific options
@@ -137,10 +130,12 @@ bool FFmpegEncoder::openEncoder() {
 }
 
 void FFmpegEncoder::closeEncoder() {
+    /*
     if (swsCtx) {
         sws_freeContext(swsCtx);
         swsCtx = nullptr;
     }
+    */
     if (pkt) {
         av_packet_free(&pkt);
         pkt = nullptr;
@@ -184,13 +179,11 @@ AVFrame* FFmpegEncoder::convertToAVFrame(const uint8_t* yPlane, const uint8_t* u
     
     frame->pts = ptsUs;
     
-    if (forceKeyframe) {
+    if (forceKeyframe.exchange(false)) {
         frame->pict_type = AV_PICTURE_TYPE_I;
-        frame->key_frame = 1;
-        forceKeyframe = false;
+        // frame->flags |= AV_FRAME_FLAG_KEY;
     } else {
         frame->pict_type = AV_PICTURE_TYPE_NONE;
-        frame->key_frame = 0;
     }
     
     return frame;
@@ -228,6 +221,6 @@ AVPacket* FFmpegEncoder::encodeI420(const uint8_t* yPlane, const uint8_t* uPlane
 }
 
 void FFmpegEncoder::requestIDR() {
-    forceKeyframe = true;
+    forceKeyframe.store(true);
 }
 

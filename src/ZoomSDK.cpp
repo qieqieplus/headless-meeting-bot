@@ -2,6 +2,7 @@
 #include "Meeting.h"
 #include "MeetingConfig.h"
 #include "util/Logger.h"
+#include "util/Checks.h"
 #include <cstdlib>
 
 using namespace ZOOMSDK;
@@ -48,11 +49,9 @@ SDKError ZoomSDK::initialize(const std::string& sdkKey, const std::string& sdkSe
     initParam.enableLogByDefault = true;
     initParam.enableGenerateDump = true;
     
-    SDKError err = InitSDK(initParam);
-    if (hasError(err, "initialize SDK")) return err;
+    ZOOM_ERR_CHECK(InitSDK(initParam), "initialize SDK");
     
-    err = createGlobalServices();
-    if (hasError(err, "create global services")) return err;
+    ZOOM_ERR_CHECK(createGlobalServices(), "create global services");
     
     m_isInitialized = true;
     Util::Logger::getInstance().success("SDK initialized successfully");
@@ -63,11 +62,9 @@ SDKError ZoomSDK::initialize(const std::string& sdkKey, const std::string& sdkSe
 SDKError ZoomSDK::createGlobalServices() {
     SDKError err;
     
-    err = CreateSettingService(&m_settingService);
-    if (hasError(err, "create setting service")) return err;
+    ZOOM_ERR_CHECK(CreateSettingService(&m_settingService), "create setting service");
     
-    err = CreateNetworkConnectionHelper(&m_networkHelper);
-    if (hasError(err, "create network connection helper")) return err;
+    ZOOM_ERR_CHECK(CreateNetworkConnectionHelper(&m_networkHelper), "create network connection helper");
     
     // Configure proxy settings
     ProxySettings proxy_setting;
@@ -81,9 +78,7 @@ SDKError ZoomSDK::createGlobalServices() {
     
     m_networkHelper->ConfigureProxy(proxy_setting);
     
-    // Create meeting service at SDK level
-    err = CreateMeetingService(&m_meetingService);
-    if (hasError(err, "create meeting service")) return err;
+    ZOOM_ERR_CHECK(CreateMeetingService(&m_meetingService), "create meeting service");
     
     return SDKERR_SUCCESS;
 }
@@ -100,8 +95,7 @@ SDKError ZoomSDK::authenticate( std::function<void()> onAuthCallback) {
     
     SDKError err;
     
-    err = CreateAuthService(&m_authService);
-    if (hasError(err, "create auth service")) return err;
+    ZOOM_ERR_CHECK(CreateAuthService(&m_authService), "create auth service");
     
     m_onAuthCallback = onAuthCallback;
     
@@ -114,8 +108,7 @@ SDKError ZoomSDK::authenticate( std::function<void()> onAuthCallback) {
     };
     
     m_authEvent = std::make_unique<AuthServiceEvent>(onAuth);
-    err = m_authService->SetEvent(m_authEvent.get());
-    if (hasError(err, "set auth event")) return err;
+    ZOOM_ERR_CHECK(m_authService->SetEvent(m_authEvent.get()), "set auth event");
     
     generateJWT(m_sdkKey, m_sdkSecret);
     
@@ -155,7 +148,6 @@ SDKError ZoomSDK::cleanup() {
         m_authService = nullptr;
     }
 
-    // Release our owned event after service is gone
     m_authEvent.reset();
     
     if (m_networkHelper) {
@@ -164,8 +156,7 @@ SDKError ZoomSDK::cleanup() {
     }
     
     if (m_isInitialized) {
-        // SDK crash due to an internal bug 
-        // CleanUPSDK();
+        CleanUPSDK();
         m_isInitialized = false;
     }
     

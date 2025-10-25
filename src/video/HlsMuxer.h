@@ -11,11 +11,12 @@ extern "C" {
 }
 
 struct HlsMuxerConfig {
-    int width = 1280;
-    int height = 720;
+    int width = 0;        // auto-detect
+    int height = 0;       // auto-detect
     int fps = 30;
-    int segmentSeconds = 2;
+    int segmentSeconds = 10;
     std::string hlsPrefix = "media"; // Base name for playlist and segments
+    std::string playlistType = "vod"; // "vod", "live", or "event"
 };
 
 // HLS muxer with fMP4 segments
@@ -51,6 +52,6 @@ private:
     AVStream* videoStream = nullptr;
     AvioMemorySink avioSink;
     bool headerWritten = false;
-    int64_t lastPts = AV_NOPTS_VALUE;
+    AVRational videoCodecTimeBase = {0, 0}; // Time base from encoder
 };
 

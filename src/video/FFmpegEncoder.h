@@ -4,21 +4,22 @@
 #include <cstddef>
 #include <string>
 #include <memory>
+#include <atomic>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
+/* #include <libswscale/swscale.h> */
 }
 
 struct FFmpegEncoderConfig {
-    int width = 0;
-    int height = 0;
+    int width = 0;        // auto-detect
+    int height = 0;       // auto-detect
     int fps = 30;
     int bitrateKbps = 2500;
     int gopSeconds = 2;              // Keyframe interval in seconds
-    std::string encoder = "auto";    // "auto", "x264", "nvenc"
+    std::string encoder = "auto";    // "x264", "nvenc", "auto"
     std::string preset = "veryfast"; // x264: ultrafast..veryslow; nvenc: fast,medium,slow
     std::string profile = "main";    // "baseline", "main", "high"
 };
@@ -69,8 +70,8 @@ private:
     AVCodecContext* codecCtx = nullptr;
     AVFrame* frame = nullptr;
     AVPacket* pkt = nullptr;
-    SwsContext* swsCtx = nullptr;
+    // SwsContext* swsCtx = nullptr;
     int64_t frameCount = 0;
-    bool forceKeyframe = false;
+    std::atomic<bool> forceKeyframe{false};
 };
 
