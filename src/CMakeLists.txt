@@ -18,7 +18,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
 pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
-# pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
+pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
 
 find_package(OpenSSL REQUIRED)
 
@@ -31,19 +31,22 @@ link_directories(${ZOOM_SDK} ${ZOOM_SDK}/qt_libs ${ZOOM_SDK}/qt_libs/Qt/lib)
 add_library(zoomsdk_c SHARED
         c_api/zoom_sdk_c.cpp
         c_api/zoom_sdk_c.h
+        c_api/zoom_sdk_internal.cpp
         c_api/zoom_sdk_internal.h
         c_api/zoom_sdk_audio_delegate.cpp
         c_api/zoom_sdk_audio_delegate.h
         c_api/zoom_sdk_video_delegate.cpp
         c_api/zoom_sdk_video_delegate.h
-        video/FFmpegEncoder.cpp
-        video/FFmpegEncoder.h
+        video/VideoEncoder.cpp
+        video/VideoEncoder.h
+        video/AudioEncoder.cpp
+        video/AudioEncoder.h
         video/HlsMuxer.cpp
         video/HlsMuxer.h
         video/AvioMemorySink.cpp
         video/AvioMemorySink.h
-        video/VideoEncodePipeline.cpp
-        video/VideoEncodePipeline.h
+        video/MediaEncodePipeline.cpp
+        video/MediaEncodePipeline.h
         ZoomSDK.cpp
         ZoomSDK.h
         Meeting.cpp
@@ -66,6 +69,12 @@ add_library(zoomsdk_c SHARED
         events/MeetingShareEvent.h
 )
 
+# Hide all symbols by default; only explicitly exported API remains visible
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|")
+  target_compile_options(zoomsdk_c PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+endif()
+target_compile_definitions(zoomsdk_c PRIVATE ZOOM_SDK_C_BUILD=1)
+
 # Link FFmpeg (required)
 target_link_libraries(zoomsdk_c PRIVATE
     meetingsdk
@@ -74,7 +83,7 @@ target_link_libraries(zoomsdk_c PRIVATE
     PkgConfig::AVCODEC
     PkgConfig::AVFORMAT
     PkgConfig::AVUTIL
-    # PkgConfig::SWSCALE
+    PkgConfig::SWRESAMPLE
 )
 
 # Set output names for shared libraries
