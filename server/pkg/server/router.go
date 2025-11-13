@@ -2,25 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 )
 
-type contextKey string
-
-const paramsContextKey contextKey = "path_params"
-
-// Params holds path parameters extracted by ParamRouter
 type Params map[string]string
-
-// GetPathParam retrieves a path parameter from the request context
-func GetPathParam(r *http.Request, name string) string {
-	params, _ := r.Context().Value(paramsContextKey).(Params)
-	if params == nil {
-		return ""
-	}
-	return params[name]
-}
 
 // ParamRouter is a tiny router supporting patterns with {param} segments
 type ParamRouter struct {
@@ -33,7 +20,6 @@ type route struct {
 	handler http.HandlerFunc
 }
 
-// NewParamRouter creates a new ParamRouter instance
 func NewParamRouter() *ParamRouter {
 	return &ParamRouter{routes: make([]route, 0)}
 }
@@ -70,13 +56,20 @@ func (rtr *ParamRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if matched {
-			ctx := context.WithValue(r.Context(), paramsContextKey, params)
+			// Store as plain map[string]string to avoid cross-package type issues
+			ctx := context.WithValue(r.Context(), "path_params", map[string]string(params))
 			rt.handler(w, r.WithContext(ctx))
 			return
 		}
 	}
 
-	http.NotFound(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Error:   "Not found",
+		Code:    http.StatusNotFound,
+		Message: "The requested resource was not found",
+	})
 }
 
 func splitPath(p string) []string {

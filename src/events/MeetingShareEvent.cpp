@@ -1,59 +1,55 @@
 #include "MeetingShareEvent.h"
+
 #include "util/Logger.h"
 
 MeetingShareEvent::MeetingShareEvent(
-    std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo &)> onShareStart,
-    std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo &)> onShareEnd)
-    : m_onShareStart(onShareStart), m_onShareEnd(onShareEnd) {}
+    std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_start,
+    std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_end)
+    : on_share_start_(on_share_start), on_share_end_(on_share_end) {}
 
-void MeetingShareEvent::onSharingStatus(
-    ZOOMSDK::ZoomSDKSharingSourceInfo shareInfo) {
-  switch (shareInfo.status) {
-  case ZOOMSDK::Sharing_Other_Share_Begin:
-    Logger::getInstance().info("Share started from user " +
-                               std::to_string(shareInfo.userid));
-    if (m_onShareStart) {
-      m_onShareStart(shareInfo);
-    }
-    break;
-  case ZOOMSDK::Sharing_Other_Share_End:
-    Logger::getInstance().info("Share ended from user " +
-                               std::to_string(shareInfo.userid));
-    if (m_onShareEnd) {
-      m_onShareEnd(shareInfo);
-    }
-    break;
-  case ZOOMSDK::Sharing_Self_Send_Begin:
-    Logger::getInstance().info("Self share started");
-    break;
-  case ZOOMSDK::Sharing_Self_Send_End:
-    Logger::getInstance().info("Self share ended");
-    break;
-  default:
-    break;
+void MeetingShareEvent::onSharingStatus(ZOOMSDK::ZoomSDKSharingSourceInfo share_info) {
+  switch (share_info.status) {
+    case ZOOMSDK::Sharing_Other_Share_Begin:
+      Logger::GetInstance().Info("Share started from user " + std::to_string(share_info.userid));
+      if (on_share_start_) {
+        on_share_start_(share_info);
+      }
+      break;
+    case ZOOMSDK::Sharing_Other_Share_End:
+      Logger::GetInstance().Info("Share ended from user " + std::to_string(share_info.userid));
+      if (on_share_end_) {
+        on_share_end_(share_info);
+      }
+      break;
+    case ZOOMSDK::Sharing_Self_Send_Begin:
+      Logger::GetInstance().Info("Self share started");
+      break;
+    case ZOOMSDK::Sharing_Self_Send_End:
+      Logger::GetInstance().Info("Self share ended");
+      break;
+    default:
+      break;
   }
 }
 
 void MeetingShareEvent::onFailedToStartShare() {
-  Logger::getInstance().error("Failed to start share");
+  Logger::GetInstance().Error("Failed to start share");
 }
 
-void MeetingShareEvent::onLockShareStatus(bool bLocked) {
+void MeetingShareEvent::onLockShareStatus(bool b_locked) {
   // Not implemented
 }
 
-void MeetingShareEvent::onShareContentNotification(
-    ZOOMSDK::ZoomSDKSharingSourceInfo shareInfo) {
+void MeetingShareEvent::onShareContentNotification(ZOOMSDK::ZoomSDKSharingSourceInfo share_info) {
   // Not implemented
 }
 
 void MeetingShareEvent::onMultiShareSwitchToSingleShareNeedConfirm(
-    ZOOMSDK::IShareSwitchMultiToSingleConfirmHandler *handler_) {
+    ZOOMSDK::IShareSwitchMultiToSingleConfirmHandler* handler) {
   // Not implemented
 }
 
-void MeetingShareEvent::onShareSettingTypeChangedNotification(
-    ZOOMSDK::ShareSettingType type) {
+void MeetingShareEvent::onShareSettingTypeChangedNotification(ZOOMSDK::ShareSettingType type) {
   // Not implemented
 }
 
@@ -61,12 +57,11 @@ void MeetingShareEvent::onSharedVideoEnded() {
   // Not implemented
 }
 
-void MeetingShareEvent::onVideoFileSharePlayError(
-    ZOOMSDK::ZoomSDKVideoFileSharePlayError error) {
+void MeetingShareEvent::onVideoFileSharePlayError(ZOOMSDK::ZoomSDKVideoFileSharePlayError error) {
   // Not implemented
 }
 
 void MeetingShareEvent::onOptimizingShareForVideoClipStatusChanged(
-    ZOOMSDK::ZoomSDKSharingSourceInfo shareInfo) {
+    ZOOMSDK::ZoomSDKSharingSourceInfo share_info) {
   // Not implemented
 }

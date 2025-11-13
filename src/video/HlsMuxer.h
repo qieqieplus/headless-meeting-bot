@@ -1,66 +1,62 @@
 #pragma once
 
-#include "AvioMemorySink.h"
 #include <cstdint>
 #include <memory>
 #include <string>
+
+#include "AvioMemorySink.h"
+#include "MediaConfig.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 }
 
-struct HlsMuxerConfig {
-  int width = 0;  // auto-detect
-  int height = 0; // auto-detect
-  int fps = 30;
-  int segmentSeconds = 30;
-  std::string hlsPrefix = "media";  // Base name for playlist and segments
-  std::string playlistType = "vod"; // "vod", "live", or "event"
-};
-
 // HLS muxer with fMP4 segments
 class HlsMuxer {
-public:
+ public:
   HlsMuxer();
   ~HlsMuxer();
 
   // Initialize muxer with config and file callback
-  bool initialize(const HlsMuxerConfig &config, HlsFileCallback fileCallback);
+  bool Initialize(const HlsMuxerConfig& config, HlsFileCallback file_callback);
 
   // Start muxing (writes header and init segment)
-  bool start();
+  bool Start();
 
   // Write an encoded video packet to the muxer
-  bool writeVideoPacket(AVPacket *pkt);
+  bool WriteVideoPacket(AVPacket* pkt);
 
   // Write an encoded audio packet to the muxer
-  bool writeAudioPacket(AVPacket *pkt);
+  bool WriteAudioPacket(AVPacket* pkt);
 
   // Write a packet (deprecated - use writeVideoPacket or writeAudioPacket)
-  bool writePacket(AVPacket *pkt) { return writeVideoPacket(pkt); }
+  bool WritePacket(AVPacket* pkt) { return WriteVideoPacket(pkt); }
 
   // Finalize muxing (writes trailer and final playlist with EXT-X-ENDLIST)
-  void finalize();
+  void Finalize();
 
   // Shutdown muxer
-  void shutdown();
+  void Shutdown();
 
-  AVCodecParameters *getVideoCodecParams();
-  AVCodecParameters *getAudioCodecParams();
-  bool configureAudioStream(const AVCodecContext *audioCtx);
+  AVCodecParameters* GetVideoCodecParams();
+  AVCodecParameters* GetAudioCodecParams();
+  bool ConfigureAudioStream(const AVCodecContext* audio_ctx);
 
-private:
-  bool openMuxer();
-  void closeMuxer();
+  // Check if muxer is ready to accept packets (header has been written)
+  bool IsReady() const { return headerWritten_; }
 
-private:
-  HlsMuxerConfig currentConfig;
-  AVFormatContext *fmtCtx = nullptr;
-  AVStream *videoStream = nullptr;
-  AVStream *audioStream = nullptr;
-  AvioMemorySink avioSink;
-  bool headerWritten = false;
-  AVRational videoCodecTimeBase = {0, 0}; // Time base from encoder
-  AVRational audioCodecTimeBase = {0, 0}; // Time base from encoder
+ private:
+  bool OpenMuxer();
+  void CloseMuxer();
+
+ private:
+  HlsMuxerConfig muxerConfig_;
+  AVFormatContext* fmtCtx_ = nullptr;
+  AVStream* videoStream_ = nullptr;
+  AVStream* audioStream_ = nullptr;
+  AvioMemorySink avioSink_;
+  bool headerWritten_ = false;
+  AVRational videoCodecTimeBase_ = {0, 0};  // Time base from encoder
+  AVRational audioCodecTimeBase_ = {0, 0};  // Time base from encoder
 };

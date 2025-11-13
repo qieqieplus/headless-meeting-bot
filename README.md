@@ -264,14 +264,15 @@ const ws = new WebSocket(
 sequenceDiagram
     participant SDK
     participant MeetingShareEvent
-    participant Meeting
+    participant UserController
+    participant MediaController
     participant VideoDelegate
 
     SDK->>MeetingShareEvent: OnSharingStatus(START, sourceInfo)
-    MeetingShareEvent->>Meeting: subscribeShare(sourceInfo)
-    
-    Meeting->>SDK: SubscribeShareStream(sourceId)
-    SDK-->>Meeting: Subscribe Success
+    MeetingShareEvent->>UserController: onShareStart(sourceInfo)
+    UserController->>MediaController: updateShareSources(sourceInfo)
+    MediaController->>SDK: SubscribeShareStream(sourceId)
+    SDK-->>MediaController: Subscribe Success
     
     Note over SDK: Sharing in progress
     
@@ -280,8 +281,9 @@ sequenceDiagram
     C API->>Go: Video Callback
     
     SDK->>MeetingShareEvent: OnSharingStatus(STOP, sourceInfo)
-    MeetingShareEvent->>Meeting: unSubscribeShare(sourceInfo)
-    Meeting->>SDK: UnsubscribeShareStream(sourceId)
+    MeetingShareEvent->>UserController: onShareEnd(sourceInfo)
+    UserController->>MediaController: updateShareSources(sourceInfo)
+    MediaController->>SDK: UnsubscribeShareStream(sourceId)
 ```
 
 ### 2.3 关键设计细节
@@ -461,7 +463,7 @@ go build -o headless-meeting-bot cmd/headless-meeting-bot/*.go
 #### 3.2.3 Docker 构建
 
 ```bash
-cd server/docker
+cd docker
 
 # 编译镜像（包含构建环境）
 ./docker-build.sh build
@@ -514,7 +516,7 @@ int main() {
     ZoomVideoEncodeParams video_params = {
         .width = 0,          // 自动检测
         .height = 0,         // 自动检测
-        .fps = 30,           // 30 FPS
+        .fps = 0,            // 自动
         .threads = 0,        // 自动
         .preset = "veryfast" // 快速编码
     };
@@ -561,14 +563,21 @@ curl http://localhost:8080/api/meetings/1234567890
 # Response: 200 OK
 {
   "meeting_id": "1234567890",
-  "status": "MEETING_STATUS_INMEETING",
-  "error": null,
+  "status": {
+    "state": "in_meeting",
+    "detail": 0
+  },
   "stats": {
+    "start_time": "2025-11-06T12:34:56Z",
     "frames_received": 12500,
-    "bytes_received": 1024000
+    "frames_dropped": 2,
+    "bytes_received": 1024000,
+    "last_frame_time": "2025-11-06T12:36:01Z"
   }
 }
 ```
+
+如果最近一次 SDK 调用返回了错误信息，会在 `status.error` 字段给出描述；当没有错误时该字段会被省略。
 
 **离开会议**
 
@@ -590,7 +599,7 @@ curl http://localhost:8080/api/meetings
 [
   {
     "meeting_id": "1234567890",
-    "status": "MEETING_STATUS_INMEETING"
+    "status": "in_meeting"
   }
 ]
 ```
@@ -744,14 +753,16 @@ cd server
 **1. Docker 内编译**
 
 ```bash
-./docker/docker-build.sh build
+cd docker
+./docker-build.sh build
 ```
 
 **2. 运行 Docker**
 
 ```bash
 # 构建镜像
-./docker/docker-build.sh deploy
+cd docker
+./docker-build.sh deploy
 
 # 运行容器
 docker run -d \
@@ -809,9 +820,10 @@ services:
 | `zoom_sdk_destroy(handle)` | 销毁 SDK |
 | `zoom_meeting_create_and_join(...)` | 创建并加入会议 |
 | `zoom_meeting_destroy(handle)` | 离开并销毁会议 |
-| `zoom_meeting_get_status(handle)` | 获取会议状态 |
+| `zoom_meeting_set_status_callback(handle, cb)` | 注册会议状态回调 |
 | `zoom_meeting_set_audio_callback(handle, cb)` | 设置音频回调 |
-| `zoom_meeting_set_video_callback(handle, cb, params)` | 设置 H.264 编码视频回调 |
+| `zoom_meeting_set_user_status_callback(handle, cb)` | 注册参会者状态回调 |
+| `zoom_meeting_set_hls_video_callback(handle, cb, params)` | 设置 HLS 视频编码/推流回调 |
 | `zoom_meeting_video_encoder_request_idr(handle)` | 请求关键帧 |
 | `zoom_sdk_run_loop()` | 运行事件循环 |
 | `zoom_sdk_stop_loop()` | 停止事件循环 |

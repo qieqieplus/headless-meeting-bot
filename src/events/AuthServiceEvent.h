@@ -1,15 +1,16 @@
 #ifndef HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H
 #define HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H
 
-#include "auth_service_interface.h"
 #include <functional>
 
-class AuthServiceEvent : public ZOOMSDK::IAuthServiceEvent {
-  std::function<void()> m_onAuth;
+#include "auth_service_interface.h"
 
-public:
-  AuthServiceEvent(std::function<void()> onAuth);
-  ~AuthServiceEvent(){};
+class AuthServiceEvent : public ZOOMSDK::IAuthServiceEvent {
+  std::function<void()> on_auth_;
+
+ public:
+  explicit AuthServiceEvent(std::function<void()> on_auth);
+  ~AuthServiceEvent() override = default;
 
   /**
    * callback that is triggered when authentication is complete
@@ -25,8 +26,7 @@ public:
    * @param reason Reason for login failure that is only valid when ret ==
    * LOGIN_FAILED
    */
-  void onLoginReturnWithReason(ZOOMSDK::LOGINSTATUS ret,
-                               ZOOMSDK::IAccountInfo *pAccountInfo,
+  void onLoginReturnWithReason(ZOOMSDK::LOGINSTATUS ret, ZOOMSDK::IAccountInfo* p_account_info,
                                ZOOMSDK::LoginFailReason reason) override;
 
   /**
@@ -48,4 +48,4 @@ public:
   void onZoomAuthIdentityExpired() override;
 };
 
-#endif // HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H
+#endif  // HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H

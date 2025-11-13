@@ -20,50 +20,56 @@ extern "C" {
 // size: byte count
 // is_playlist: 1 if filename ends with .m3u8, 0 otherwise
 // sequence: media sequence number (0 for init/playlist)
-using HlsFileCallback =
-    std::function<void(const char *filename, const uint8_t *data, size_t size,
-                       int is_playlist, uint64_t sequence)>;
+using HlsFileCallback = std::function<void(const char* filename, const uint8_t* data, size_t size,
+                                           int is_playlist, uint64_t sequence)>;
 
 // Custom AVIO context manager for in-memory buffering of HLS outputs
 class AvioMemorySink {
-public:
+ public:
   AvioMemorySink();
   ~AvioMemorySink();
 
   // Set the callback invoked when a file is closed
-  void setFileCallback(HlsFileCallback cb);
+  void SetFileCallback(const HlsFileCallback& cb);
 
   // Install custom io_open/io_close callbacks into the AVFormatContext
   // Must be called before avformat_write_header
-  void installIOCallbacks(AVFormatContext *fmtCtx);
+  void InstallIoCallbacks(AVFormatContext* fmt_ctx);
 
-private:
+  // Emit a final playlist with #EXT-X-ENDLIST appended if it was missing.
+  // Safe to call multiple times; only emits when needed.
+  void EmitEndlistIfMissing();
+
+ private:
   struct FileBuffer {
     std::vector<uint8_t> data;
     std::string filename;
     uint64_t sequence = 0;
-    size_t position = 0; // current write/seek position
+    size_t position = 0;  // current write/seek position
   };
 
   // Static trampolines for FFmpeg callbacks
-  static int ioOpenCallback(AVFormatContext *s, AVIOContext **pb,
-                            const char *url, int flags, AVDictionary **options);
-  static int ioCloseCallback(AVFormatContext *s, AVIOContext *pb);
+  static int IoOpenCallback(AVFormatContext* s, AVIOContext** pb, const char* url, int flags,
+                            AVDictionary** options);
+  static int IoCloseCallback(AVFormatContext* s, AVIOContext* pb);
 
   // Instance methods
-  int openFile(AVFormatContext *s, AVIOContext **pb, const char *url,
-               int flags);
-  int closeFile(AVFormatContext *s, AVIOContext *pb);
+  int OpenFile(AVFormatContext* s, AVIOContext** pb, const char* url, int flags);
+  int CloseFile(AVFormatContext* s, AVIOContext* pb);
 
   // AVIO write callback
-  static int writePacket(void *opaque, uint8_t *buf, int buf_size);
+  static int WritePacket(void* opaque, uint8_t* buf, int buf_size);
   // AVIO seek callback
-  static int64_t seek(void *opaque, int64_t offset, int whence);
+  static int64_t Seek(void* opaque, int64_t offset, int whence);
 
-private:
-  HlsFileCallback fileCallback;
-  std::mutex mtx;
+ private:
+  HlsFileCallback fileCallback_;
+  std::mutex mtx_;
   // Map AVIOContext* -> FileBuffer for active files
-  std::unordered_map<AVIOContext *, std::shared_ptr<FileBuffer>> activeBuffers;
-  uint64_t segmentSequence = 0;
+  std::unordered_map<AVIOContext*, std::shared_ptr<FileBuffer>> activeBuffers_;
+  uint64_t segmentSequence_ = 0;
+
+  // Last seen playlist snapshot (normalized name, exact contents)
+  std::string lastPlaylistName_;
+  std::vector<uint8_t> lastPlaylistData_;
 };

@@ -1,278 +1,275 @@
 #include "HlsMuxer.h"
+
 #include "util/Logger.h"
 
 extern "C" {
 #include <libavutil/opt.h>
+
+int rename(const char* oldpath, const char* newpath) { return 0; }
 }
 
 namespace {
-static constexpr const char *HLS_FORMAT_NAME = "hls";
-static constexpr const char *HLS_SEGMENT_TYPE = "fmp4";
-} // namespace
+static constexpr const char* kHlsFormatName = "hls";
+static constexpr const char* kHlsSegmentType = "fmp4";
+}  // namespace
 
 HlsMuxer::HlsMuxer() = default;
 
-HlsMuxer::~HlsMuxer() { shutdown(); }
+HlsMuxer::~HlsMuxer() { Shutdown(); }
 
-bool HlsMuxer::initialize(const HlsMuxerConfig &config,
-                          HlsFileCallback fileCallback) {
-  currentConfig = config;
-  avioSink.setFileCallback(fileCallback);
-  return openMuxer();
+bool HlsMuxer::Initialize(const HlsMuxerConfig& config, HlsFileCallback file_callback) {
+  muxerConfig_ = config;
+  avioSink_.SetFileCallback(file_callback);
+  return OpenMuxer();
 }
 
-bool HlsMuxer::openMuxer() {
+bool HlsMuxer::OpenMuxer() {
   // Allocate output format context for HLS
-  const AVOutputFormat *fmt =
-      av_guess_format(HLS_FORMAT_NAME, nullptr, nullptr);
+  const AVOutputFormat* fmt = av_guess_format(kHlsFormatName, nullptr, nullptr);
   if (!fmt) {
-    Logger::getInstance().error("HLS muxer not found");
+    Logger::GetInstance().Error("HLS muxer not found");
     return false;
   }
 
-  int ret = avformat_alloc_output_context2(&fmtCtx, fmt, nullptr, nullptr);
-  if (ret < 0 || !fmtCtx) {
-    Logger::getInstance().error("Failed to allocate HLS output context");
+  int ret = avformat_alloc_output_context2(&fmtCtx_, fmt, nullptr, nullptr);
+  if (ret < 0 || !fmtCtx_) {
+    Logger::GetInstance().Error("Failed to allocate HLS output context");
     return false;
   }
 
   // Create video stream
-  videoStream = avformat_new_stream(fmtCtx, nullptr);
-  if (!videoStream) {
-    Logger::getInstance().error("Failed to create video stream");
-    closeMuxer();
+  videoStream_ = avformat_new_stream(fmtCtx_, nullptr);
+  if (!videoStream_) {
+    Logger::GetInstance().Error("Failed to create video stream");
+    CloseMuxer();
     return false;
   }
 
-  // Do NOT set videoStream->time_base here - let avformat_write_header choose
+  // Do NOT set videoStream_->time_base here - let avformat_write_header choose
   // it
-  videoStream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-  videoStream->codecpar->codec_id = AV_CODEC_ID_H264;
+  videoStream_->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+  videoStream_->codecpar->codec_id = AV_CODEC_ID_H264;
 
   // Create audio stream
-  audioStream = avformat_new_stream(fmtCtx, nullptr);
-  if (!audioStream) {
-    Logger::getInstance().error("Failed to create audio stream");
-    closeMuxer();
+  audioStream_ = avformat_new_stream(fmtCtx_, nullptr);
+  if (!audioStream_) {
+    Logger::GetInstance().Error("Failed to create audio stream");
+    CloseMuxer();
     return false;
   }
 
-  // Do NOT set audioStream->time_base here - let avformat_write_header choose
+  // Do NOT set audioStream_->time_base here - let avformat_write_header choose
   // it
-  audioStream->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
-  audioStream->codecpar->codec_id = AV_CODEC_ID_AAC;
+  audioStream_->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+  audioStream_->codecpar->codec_id = AV_CODEC_ID_AAC;
 
   // Configure HLS options
-  std::string playlistName = currentConfig.hlsPrefix + ".m3u8";
-  std::string initFilename = currentConfig.hlsPrefix + "-init.mp4";
-  std::string segmentFilename = currentConfig.hlsPrefix + "-part-%05d.m4s";
+  std::string playlist_name = muxerConfig_.hls_prefix + ".m3u8";
+  std::string init_filename = muxerConfig_.hls_prefix + "-init.mp4";
+  std::string segment_filename = muxerConfig_.hls_prefix + "-part-%05d.m4s";
 
-  av_opt_set(fmtCtx->priv_data, "hls_segment_type", HLS_SEGMENT_TYPE, 0);
-  av_opt_set(fmtCtx->priv_data, "hls_fmp4_init_filename", initFilename.c_str(),
-             0);
-  av_opt_set_int(fmtCtx->priv_data, "hls_time", currentConfig.segmentSeconds,
-                 0);
-  // Avoid temp_file since we're not writing to disk
-  av_opt_set(fmtCtx->priv_data, "hls_flags", "independent_segments", 0);
-  av_opt_set(fmtCtx->priv_data, "hls_playlist_type",
-             currentConfig.playlistType.c_str(), 0);
-  av_opt_set(fmtCtx->priv_data, "hls_segment_filename", segmentFilename.c_str(),
-             0);
-  av_opt_set(fmtCtx->priv_data, "method", "PUT", 0);
+  av_opt_set(fmtCtx_->priv_data, "hls_segment_type", kHlsSegmentType, 0);
+  av_opt_set(fmtCtx_->priv_data, "hls_fmp4_init_filename", init_filename.c_str(), 0);
+  av_opt_set_int(fmtCtx_->priv_data, "hls_time", muxerConfig_.hls_time_seconds, 0);
+  // Write playlist directly (no temp_file rename), so our in-memory IO sink receives an
+  // update on each write. Keep segments independent; append_list grows EVENT playlist.
+  av_opt_set(fmtCtx_->priv_data, "hls_flags", "independent_segments+append_list", 0);
+  // Force the configured playlist type (default: event)
+  av_opt_set(fmtCtx_->priv_data, "hls_playlist_type", muxerConfig_.playlist_type.c_str(), 0);
+  av_opt_set_int(fmtCtx_->priv_data, "hls_list_size", muxerConfig_.hls_list_size, 0);
+  av_opt_set(fmtCtx_->priv_data, "hls_segment_filename", segment_filename.c_str(), 0);
+  av_opt_set(fmtCtx_->priv_data, "method", "PUT", 0);
 
   // Install custom IO callbacks
-  avioSink.installIOCallbacks(fmtCtx);
+  avioSink_.InstallIoCallbacks(fmtCtx_);
 
   // Set the output URL (logical name for the playlist)
-  fmtCtx->url = av_strdup(playlistName.c_str());
+  fmtCtx_->url = av_strdup(playlist_name.c_str());
 
-  Logger::getInstance().success("HLS muxer initialized");
+  Logger::GetInstance().Success("HLS muxer initialized");
   return true;
 }
 
-void HlsMuxer::closeMuxer() {
-  if (fmtCtx) {
+void HlsMuxer::CloseMuxer() {
+  if (fmtCtx_) {
     // Free the URL string we allocated
-    av_free(fmtCtx->url);
-    fmtCtx->url = nullptr;
-    avformat_free_context(fmtCtx);
-    fmtCtx = nullptr;
+    av_free(fmtCtx_->url);
+    fmtCtx_->url = nullptr;
+    avformat_free_context(fmtCtx_);
+    fmtCtx_ = nullptr;
   }
-  videoStream = nullptr;
-  audioStream = nullptr;
-  headerWritten = false;
-  videoCodecTimeBase = {0, 0};
-  audioCodecTimeBase = {0, 0};
+  videoStream_ = nullptr;
+  audioStream_ = nullptr;
+  headerWritten_ = false;
+  videoCodecTimeBase_ = {0, 0};
+  audioCodecTimeBase_ = {0, 0};
 }
 
-bool HlsMuxer::start() {
-  if (!fmtCtx || !videoStream) {
-    Logger::getInstance().error("Muxer not initialized");
+bool HlsMuxer::Start() {
+  if (!fmtCtx_ || !videoStream_) {
+    Logger::GetInstance().Error("Muxer not initialized");
     return false;
   }
 
-  if (headerWritten) {
-    Logger::getInstance().warn("Header already written");
+  if (headerWritten_) {
+    Logger::GetInstance().Warn("Header already written");
     return true;
   }
 
   // Capture encoder time base from video stream if available; fallback to
   // microseconds
-  if (videoStream->time_base.num != 0 && videoStream->time_base.den != 0) {
-    videoCodecTimeBase = videoStream->time_base;
+  if (videoStream_->time_base.num != 0 && videoStream_->time_base.den != 0) {
+    videoCodecTimeBase_ = videoStream_->time_base;
   } else {
-    videoCodecTimeBase = AVRational{1, 1000000};
+    videoCodecTimeBase_ = AVRational{1, 1000000};
   }
 
   // Capture encoder time base from audio stream if available; fallback to
   // microseconds
-  if (audioStream && audioStream->time_base.num != 0 &&
-      audioStream->time_base.den != 0) {
-    audioCodecTimeBase = audioStream->time_base;
+  if (audioStream_ && audioStream_->time_base.num != 0 && audioStream_->time_base.den != 0) {
+    audioCodecTimeBase_ = audioStream_->time_base;
   } else {
-    audioCodecTimeBase = AVRational{1, 1000000};
+    audioCodecTimeBase_ = AVRational{1, 1000000};
   }
 
-  int ret = avformat_write_header(fmtCtx, nullptr);
+  int ret = avformat_write_header(fmtCtx_, nullptr);
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
-    Logger::getInstance().error(std::string("Failed to write HLS header: ") +
-                                errbuf);
+    Logger::GetInstance().Error(std::string("Failed to write HLS header: ") + errbuf);
     return false;
   }
 
-  headerWritten = true;
-  Logger::getInstance().success("HLS header written");
+  headerWritten_ = true;
+  Logger::GetInstance().Success("HLS header written");
   return true;
 }
 
-bool HlsMuxer::configureAudioStream(const AVCodecContext *audioCtx) {
-  if (!audioStream || !audioCtx) {
-    Logger::getInstance().error("configureAudioStream: null stream or context");
+bool HlsMuxer::ConfigureAudioStream(const AVCodecContext* audio_ctx) {
+  if (!audioStream_ || !audio_ctx) {
+    Logger::GetInstance().Error("configureAudioStream: null stream or context");
     return false;
   }
 
-  AVCodecParameters *codecpar = audioStream->codecpar;
-  int ret = avcodec_parameters_from_context(codecpar, audioCtx);
+  AVCodecParameters* codecpar = audioStream_->codecpar;
+  int ret = avcodec_parameters_from_context(codecpar, audio_ctx);
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
-    Logger::getInstance().error(
-        std::string("avcodec_parameters_from_context failed: ") + errbuf);
+    Logger::GetInstance().Error(std::string("avcodec_parameters_from_context failed: ") + errbuf);
     return false;
   }
 
-  codecpar->format = audioCtx->sample_fmt;
-  ret = av_channel_layout_copy(&codecpar->ch_layout, &audioCtx->ch_layout);
+  codecpar->format = audio_ctx->sample_fmt;
+  ret = av_channel_layout_copy(&codecpar->ch_layout, &audio_ctx->ch_layout);
   if (ret < 0) {
-    Logger::getInstance().error("Failed to copy audio channel layout");
+    Logger::GetInstance().Error("Failed to copy audio channel layout");
     return false;
   }
 
-  audioStream->time_base = audioCtx->time_base;
+  audioStream_->time_base = audio_ctx->time_base;
 
-  Logger::getInstance().info(std::string("Audio stream configured: ") +
+  Logger::GetInstance().Info(std::string("Audio stream configured: ") +
                              std::to_string(codecpar->sample_rate) + "Hz, " +
-                             std::to_string(codecpar->ch_layout.nb_channels) +
-                             " channels");
+                             std::to_string(codecpar->ch_layout.nb_channels) + " channels");
   return true;
 }
 
-bool HlsMuxer::writeVideoPacket(AVPacket *pkt) {
-  if (!fmtCtx || !videoStream || !headerWritten || !pkt) {
+bool HlsMuxer::WriteVideoPacket(AVPacket* pkt) {
+  if (!fmtCtx_ || !videoStream_ || !headerWritten_ || !pkt) {
     return false;
   }
 
   // Make a stack copy by referencing the original packet (no heap alloc)
-  AVPacket pktLocal =
-      {}; // Initialize to zero (replaces deprecated av_init_packet)
-  if (av_packet_ref(&pktLocal, pkt) < 0) {
+  AVPacket pkt_local = {};  // Initialize to zero (replaces deprecated av_init_packet)
+  if (av_packet_ref(&pkt_local, pkt) < 0) {
     return false;
   }
 
-  pktLocal.stream_index = videoStream->index;
+  pkt_local.stream_index = videoStream_->index;
 
   // Rescale timestamps from encoder time base to stream time base
-  av_packet_rescale_ts(&pktLocal, videoCodecTimeBase, videoStream->time_base);
+  av_packet_rescale_ts(&pkt_local, videoCodecTimeBase_, videoStream_->time_base);
 
-  int ret = av_interleaved_write_frame(fmtCtx, &pktLocal);
-  av_packet_unref(&pktLocal);
+  int ret = av_interleaved_write_frame(fmtCtx_, &pkt_local);
+  av_packet_unref(&pkt_local);
 
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
-    Logger::getInstance().error(std::string("Failed to write video packet: ") +
-                                errbuf);
+    Logger::GetInstance().Error(std::string("Failed to write video packet: ") + errbuf);
     return false;
   }
   return true;
 }
 
-bool HlsMuxer::writeAudioPacket(AVPacket *pkt) {
-  if (!fmtCtx || !audioStream || !headerWritten || !pkt) {
+bool HlsMuxer::WriteAudioPacket(AVPacket* pkt) {
+  if (!fmtCtx_ || !audioStream_ || !headerWritten_ || !pkt) {
     return false;
   }
 
   // Make a stack copy by referencing the original packet (no heap alloc)
-  AVPacket pktLocal =
-      {}; // Initialize to zero (replaces deprecated av_init_packet)
-  if (av_packet_ref(&pktLocal, pkt) < 0) {
+  AVPacket pkt_local = {};  // Initialize to zero (replaces deprecated av_init_packet)
+  if (av_packet_ref(&pkt_local, pkt) < 0) {
     return false;
   }
 
-  pktLocal.stream_index = audioStream->index;
+  pkt_local.stream_index = audioStream_->index;
 
   // Rescale timestamps from encoder time base to stream time base
-  av_packet_rescale_ts(&pktLocal, audioCodecTimeBase, audioStream->time_base);
+  av_packet_rescale_ts(&pkt_local, audioCodecTimeBase_, audioStream_->time_base);
 
-  int ret = av_interleaved_write_frame(fmtCtx, &pktLocal);
-  av_packet_unref(&pktLocal);
+  int ret = av_interleaved_write_frame(fmtCtx_, &pkt_local);
+  av_packet_unref(&pkt_local);
 
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
-    Logger::getInstance().error(std::string("Failed to write audio packet: ") +
-                                errbuf);
+    Logger::GetInstance().Error(std::string("Failed to write audio packet: ") + errbuf);
     return false;
   }
   return true;
 }
 
-void HlsMuxer::finalize() {
-  if (!fmtCtx || !headerWritten)
+void HlsMuxer::Finalize() {
+  if (!fmtCtx_ || !headerWritten_) {
     return;
+  }
 
-  Logger::getInstance().info("Writing trailer");
+  Logger::GetInstance().Info("Writing trailer");
 
-  int ret = av_write_trailer(fmtCtx);
+  int ret = av_write_trailer(fmtCtx_);
   if (ret < 0) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(ret, errbuf, sizeof(errbuf));
-    Logger::getInstance().warn(std::string("Failed to write trailer: ") +
-                               errbuf);
+    Logger::GetInstance().Warn(std::string("Failed to write trailer: ") + errbuf);
   } else {
-    Logger::getInstance().success("HLS trailer written");
+    Logger::GetInstance().Success("HLS trailer written");
   }
 
-  Logger::getInstance().info("HLS muxer finalized");
+  // Ensure ENDLIST is present for seekable playback with EVENT playlists.
+  avioSink_.EmitEndlistIfMissing();
 
-  headerWritten = false;
+  Logger::GetInstance().Info("HLS muxer finalized");
+
+  headerWritten_ = false;
 }
 
-void HlsMuxer::shutdown() {
-  finalize();
-  closeMuxer();
+void HlsMuxer::Shutdown() {
+  Finalize();
+  CloseMuxer();
 }
 
-AVCodecParameters *HlsMuxer::getVideoCodecParams() {
-  if (!videoStream)
+AVCodecParameters* HlsMuxer::GetVideoCodecParams() {
+  if (!videoStream_) {
     return nullptr;
-  return videoStream->codecpar;
+  }
+  return videoStream_->codecpar;
 }
 
-AVCodecParameters *HlsMuxer::getAudioCodecParams() {
-  if (!audioStream)
+AVCodecParameters* HlsMuxer::GetAudioCodecParams() {
+  if (!audioStream_) {
     return nullptr;
-  return audioStream->codecpar;
+  }
+  return audioStream_->codecpar;
 }

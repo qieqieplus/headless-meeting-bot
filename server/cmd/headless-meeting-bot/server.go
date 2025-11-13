@@ -8,10 +8,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/qieqieplus/headless-meeting-bot/server/pkg/audio"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/config"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server/ws"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
 )
 
 func startServer() {
@@ -26,15 +27,17 @@ func startServer() {
 	log.Info("Starting server...")
 
 	// Create components
-	audioBus := audio.NewBus()
+	audioBus := stream.NewAudioBus()
+	eventsBus := stream.NewEventBus()
+	videoBus := stream.NewVideoBus()
 
 	// Use ProcessManager for multi-process architecture to avoid GLib context conflicts
-	processManager, err := NewProcessManager(cfg.ZoomSDKKey, cfg.ZoomSDKSecret, audioBus)
+	processManager, err := NewProcessManager(cfg.ZoomSDKKey, cfg.ZoomSDKSecret, audioBus, eventsBus, videoBus)
 	if err != nil {
 		log.Fatalf("Failed to create process manager: %v", err)
 	}
 
-	wsServer := server.NewWebSocketServer(audioBus, processManager, cfg)
+	wsServer := ws.NewWebSocketServer(audioBus, eventsBus, videoBus, processManager, cfg)
 	httpServer := server.NewHTTPServer(processManager, wsServer)
 
 	// Start HTTP server in a goroutine
@@ -71,15 +74,11 @@ func waitForShutdown(srv *http.Server, manager *ProcessManager) {
 	// Shutdown meeting manager first
 	if err := manager.Shutdown(); err != nil {
 		log.Errorf("Error during meeting manager shutdown: %v", err)
-	} else {
-		log.Info("Meeting manager shut down successfully")
 	}
 
 	// Shutdown HTTP server
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Errorf("Error during HTTP server shutdown: %v", err)
-	} else {
-		log.Info("HTTP server shut down successfully")
 	}
 
 	log.Info("Server shutdown complete.")

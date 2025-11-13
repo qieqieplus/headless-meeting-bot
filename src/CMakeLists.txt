@@ -28,15 +28,17 @@ include_directories(${ZOOM_SDK}/h)
 link_directories(${ZOOM_SDK} ${ZOOM_SDK}/qt_libs ${ZOOM_SDK}/qt_libs/Qt/lib)
 
 # C API shared library
-add_library(zoomsdk_c SHARED
-        c_api/zoom_sdk_c.cpp
-        c_api/zoom_sdk_c.h
-        c_api/zoom_sdk_internal.cpp
-        c_api/zoom_sdk_internal.h
-        c_api/zoom_sdk_audio_delegate.cpp
-        c_api/zoom_sdk_audio_delegate.h
-        c_api/zoom_sdk_video_delegate.cpp
-        c_api/zoom_sdk_video_delegate.h
+add_library(zoombot_c SHARED
+        c_api/zoom_bot_c.cpp
+        c_api/zoom_bot_c.h
+        c_api/zoom_bot_internal.cpp
+        c_api/zoom_bot_internal.h
+        c_api/zoom_bot_audio_delegate.cpp
+        c_api/zoom_bot_audio_delegate.h
+        c_api/zoom_bot_video_delegate.cpp
+        c_api/zoom_bot_video_delegate.h
+        c_api/zoom_bot_share_delegate.cpp
+        c_api/zoom_bot_share_delegate.h
         video/VideoEncoder.cpp
         video/VideoEncoder.h
         video/AudioEncoder.cpp
@@ -47,12 +49,17 @@ add_library(zoomsdk_c SHARED
         video/AvioMemorySink.h
         video/MediaEncodePipeline.cpp
         video/MediaEncodePipeline.h
+        MediaConfig.cpp
+        MediaConfig.h
+        util/TimelineClock.h
         ZoomSDK.cpp
         ZoomSDK.h
         Meeting.cpp
         Meeting.h
         MediaController.cpp
         MediaController.h
+        UserController.cpp
+        UserController.h
         SDKConfig.cpp
         SDKConfig.h
         MeetingConfig.cpp
@@ -67,16 +74,23 @@ add_library(zoomsdk_c SHARED
         events/MeetingRecordingCtrlEvent.h
         events/MeetingShareEvent.cpp
         events/MeetingShareEvent.h
+        events/MeetingAudioEvent.cpp
+        events/MeetingAudioEvent.h
+        events/MeetingVideoEvent.cpp
+        events/MeetingVideoEvent.h
+        events/MeetingParticipantsEvent.cpp
+        events/MeetingParticipantsEvent.h
+        events/IUserEventSink.h
 )
 
 # Hide all symbols by default; only explicitly exported API remains visible
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|")
-  target_compile_options(zoomsdk_c PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+  target_compile_options(zoombot_c PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 endif()
-target_compile_definitions(zoomsdk_c PRIVATE ZOOM_SDK_C_BUILD=1)
+target_compile_definitions(zoombot_c PRIVATE ZOOM_BOT_C_BUILD=1)
 
 # Link FFmpeg (required)
-target_link_libraries(zoomsdk_c PRIVATE
+target_link_libraries(zoombot_c PRIVATE
     meetingsdk
     PkgConfig::deps
     ${OPENSSL_LIBRARIES}
@@ -87,12 +101,12 @@ target_link_libraries(zoomsdk_c PRIVATE
 )
 
 # Set output names for shared libraries
-set_target_properties(zoomsdk_c PROPERTIES OUTPUT_NAME "zoomsdk_c")
+set_target_properties(zoombot_c PROPERTIES OUTPUT_NAME "zoombot_c")
 
 # Set library version and soversion
-set_target_properties(zoomsdk_c PROPERTIES VERSION 1.0.0 SOVERSION 1)
+set_target_properties(zoombot_c PROPERTIES VERSION 1.0.0 SOVERSION 1)
 
 # C API example executable (unified demo supporting audio/video/share modes)
 add_executable(headless_zoom_bot_c c_api/demo.c)
 target_include_directories(headless_zoom_bot_c PRIVATE c_api)
-target_link_libraries(headless_zoom_bot_c PRIVATE zoomsdk_c PkgConfig::deps)
+target_link_libraries(headless_zoom_bot_c PRIVATE zoombot_c PkgConfig::deps)

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <queue>
 #include <string>
 
 extern "C" {
@@ -15,65 +16,66 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
-struct AudioEncoderConfig {
-  int sampleRate = 32000;    // Target sample rate
-  int channels = 1;          // Stereo (1 = mono, 2 = stereo)
-  int bitrateKbps = 128;     // AAC bitrate
-  std::string codec = "aac"; // "aac" or "libfdk_aac"
-};
+#include "MediaConfig.h"
 
 // FFmpeg-based AAC audio encoder
 class AudioEncoder {
-public:
+ public:
   AudioEncoder();
   ~AudioEncoder();
 
   // Initialize encoder with given config
-  bool initialize(const AudioEncoderConfig &config);
+  bool Initialize(const AudioEncoderConfig& config);
 
   // Reinitialize with new config (closes and reopens encoder)
-  bool reinitialize(const AudioEncoderConfig &config);
+  bool Reinitialize(const AudioEncoderConfig& config);
 
   // Shutdown encoder
-  void shutdown();
+  void Shutdown();
 
-  // Encode PCM S16LE audio and return encoded packet
-  // Returns AVPacket* on success (caller must call av_packet_unref), nullptr on
-  // failure or when no packet ready Input: interleaved S16LE PCM samples;
-  // timestampMs used to derive initial PTS alignment
-  AVPacket *encodePCM(const uint8_t *pcmData, size_t pcmLength,
-                      int inputSampleRate, int inputChannels,
-                      int64_t timestampMs);
+  // Encode PCM S16LE audio. Returns true on success, false on error.
+  // Note: Encoding audio may produce 0, 1, or multiple packets due to
+  // encoder buffering and FIFO management. Use getNextPacket() to retrieve
+  // ready packets. Input: interleaved S16LE PCM samples; timestampMs used to
+  // derive initial PTS alignment
+  bool EncodePcm(const uint8_t* pcm_data, size_t pcm_length, int input_sample_rate,
+                 int input_channels, int64_t timestamp_ms);
 
-  int getSampleRate() const { return codecCtx ? codecCtx->sample_rate : 0; }
-  int getChannels() const {
-    return codecCtx ? codecCtx->ch_layout.nb_channels : 0;
-  }
-  AVCodecContext *getCodecContext() { return codecCtx; }
-  int getFrameSize() const;
-  int64_t getFrameDuration() const { return frameDuration; }
+  // Get next available encoded packet from the internal queue.
+  // Returns AVPacket* on success (caller must call av_packet_free), nullptr if
+  // no packets are ready. Call this in a loop after encodePCM() until it
+  // returns nullptr.
+  AVPacket* GetNextPacket();
 
-private:
-  bool openEncoder();
-  void closeEncoder();
-  const AVCodec *selectCodec(const std::string &codecName);
-  bool configureEncoder(AVCodecContext *ctx, const AVCodec *codec);
-  bool ensureResampler(int inputSampleRate, int inputChannels);
-  int convertToFifo(const uint8_t *pcmData, size_t pcmLength,
-                    int inputSampleRate, int inputChannels);
+  // Flush the encoder to retrieve all remaining buffered packets.
+  // Call getNextPacket() after this to retrieve flushed packets.
+  void Flush();
 
-private:
-  AudioEncoderConfig currentConfig;
-  AVCodecContext *codecCtx = nullptr;
-  AVFrame *frame = nullptr;
-  AVPacket *pkt = nullptr;
-  SwrContext *swrCtx = nullptr;
-  AVAudioFifo *audioFifo = nullptr;
-  int64_t encodedSamples = 0;
-  int64_t basePtsSamples = AV_NOPTS_VALUE;
-  int64_t nextPts = 0;
-  int64_t lastPts = AV_NOPTS_VALUE;
-  int64_t frameDuration = 0;
-  int lastInputSampleRate = 0;
-  int lastInputChannels = 0;
+  int GetSampleRate() const { return codecCtx_ ? codecCtx_->sample_rate : 0; }
+  int GetChannels() const { return codecCtx_ ? codecCtx_->ch_layout.nb_channels : 0; }
+  AVCodecContext* GetCodecContext() { return codecCtx_; }
+  int GetFrameSize() const;
+  int64_t GetFrameDuration() const { return frameDuration_; }
+
+ private:
+  bool OpenEncoder();
+  void CloseEncoder();
+  const AVCodec* SelectCodec(const std::string& codec_name);
+  bool ConfigureEncoder(AVCodecContext* ctx, const AVCodec* codec);
+  bool EnsureResampler(int input_sample_rate, int input_channels);
+  int ConvertToFifo(const uint8_t* pcm_data, size_t pcm_length, int input_sample_rate,
+                    int input_channels);
+  void DrainPackets();
+
+ private:
+  AudioEncoderConfig audioConfig_;
+  AVCodecContext* codecCtx_ = nullptr;
+  AVFrame* frame_ = nullptr;
+  SwrContext* swrCtx_ = nullptr;
+  AVAudioFifo* audioFifo_ = nullptr;
+  int64_t nextPts_ = AV_NOPTS_VALUE;  // Next PTS in sample units (encoder's native timebase)
+  int64_t frameDuration_ = 0;
+  int lastInputSampleRate_ = 0;
+  int lastInputChannels_ = 0;
+  std::queue<AVPacket*> packetQueue_;
 };

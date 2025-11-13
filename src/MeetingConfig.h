@@ -4,53 +4,30 @@
 #include <string>
 
 class MeetingConfig {
-private:
-  std::string m_meetingId;
-  std::string m_password;
-  bool m_isMeetingStart;
-  std::string m_joinToken;
-  bool m_useRawAudio;
-  bool m_useRawVideo; // Always records share when enabled
-  std::string m_displayName;
+ private:
+  std::string meeting_id_;
+  std::string password_;
+  bool is_meeting_start_;
+  std::string join_token_;
+  bool use_raw_audio_;
+  bool use_raw_video_;  // Always records share when enabled
+  std::string display_name_;
 
-public:
-  MeetingConfig(const std::string &meetingId = "",
-                const std::string &password = "",
-                const std::string &displayName = "",
-                bool isMeetingStart = false, const std::string &joinToken = "",
-                bool useRawAudio = false, bool useRawVideo = false);
+ public:
+  explicit MeetingConfig(const std::string& meeting_id = "", const std::string& password = "",
+                         const std::string& display_name = "", bool is_meeting_start = false,
+                         const std::string& join_token = "", bool use_raw_audio = false,
+                         bool use_raw_video = false);
 
   // Getters
-  const std::string &meetingId() const { return m_meetingId; }
-  const std::string &password() const { return m_password; }
-  const std::string &displayName() const { return m_displayName; }
-  const std::string &joinToken() const { return m_joinToken; }
-  bool isMeetingStart() const { return m_isMeetingStart; }
-  bool useRawAudio() const { return m_useRawAudio; }
-  bool useRawVideo() const { return m_useRawVideo; }
-  bool useRawRecording() const { return m_useRawAudio || m_useRawVideo; }
-
-  // Setters
-  void setMeetingId(const std::string &meetingId) { m_meetingId = meetingId; }
-  void setPassword(const std::string &password) { m_password = password; }
-  void setDisplayName(const std::string &displayName) {
-    m_displayName = displayName;
-  }
-  void setJoinToken(const std::string &joinToken) { m_joinToken = joinToken; }
-  void setMeetingStart(bool isMeetingStart) {
-    m_isMeetingStart = isMeetingStart;
-  }
-  void setUseRawAudio(bool useRawAudio) { m_useRawAudio = useRawAudio; }
-  void setUseRawVideo(bool useRawVideo) { m_useRawVideo = useRawVideo; }
-
-  // Validation
-  bool isValidForJoining() const {
-    return !m_meetingId.empty() && !m_password.empty() && !m_isMeetingStart;
-  }
-
-  bool isValidForStarting() const { return m_isMeetingStart; }
-
-  bool isValid() const { return isValidForJoining() || isValidForStarting(); }
+  const std::string& MeetingId() const { return meeting_id_; }
+  const std::string& Password() const { return password_; }
+  const std::string& DisplayName() const { return display_name_; }
+  const std::string& JoinToken() const { return join_token_; }
+  bool IsMeetingStart() const { return is_meeting_start_; }
+  bool UseRawAudio() const { return use_raw_audio_; }
+  bool UseRawVideo() const { return use_raw_video_; }
+  bool UseRawRecording() const { return use_raw_audio_ || use_raw_video_; }
 };
 
-#endif // HEADLESS_ZOOM_BOT_MEETING_CONFIG_H
+#endif  // HEADLESS_ZOOM_BOT_MEETING_CONFIG_H

@@ -2,16 +2,16 @@
 #ifndef HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H
 #define HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H
 
-#include "meeting_service_components/meeting_recording_interface.h"
 #include <functional>
 
+#include "meeting_service_components/meeting_recording_interface.h"
+
 class MeetingRecordingCtrlEvent : public ZOOMSDK::IMeetingRecordingCtrlEvent {
+  std::function<void(bool)> on_recording_privilege_changed_;
 
-  std::function<void(bool)> m_onRecordingPrivilegeChanged;
-
-public:
-  MeetingRecordingCtrlEvent(std::function<void(bool)> onPrivilegeChanged);
-  ~MeetingRecordingCtrlEvent();
+ public:
+  explicit MeetingRecordingCtrlEvent(std::function<void(bool)> on_privilege_changed);
+  ~MeetingRecordingCtrlEvent() override;
 
   /**
    * Fires when the status of local recording changes
@@ -29,33 +29,30 @@ public:
    * Fires when recording privilege changes
    * @param bCanRec true if the user can record
    */
-  void onRecordPrivilegeChanged(bool bCanRec) override;
+  void onRecordPrivilegeChanged(bool b_can_rec) override;
 
   /**
    * fires when the local recording privilege changes
    * @param status status of the local recording privliege request
    */
-  void onLocalRecordingPrivilegeRequestStatus(
-      ZOOMSDK::RequestLocalRecordingStatus status) override;
+  void onLocalRecordingPrivilegeRequestStatus(ZOOMSDK::RequestLocalRecordingStatus status) override;
 
   /**
    * Fires when a user requests local recording privilege
    * @param handler data when local recording privilege is requested
    */
   void onLocalRecordingPrivilegeRequested(
-      ZOOMSDK::IRequestLocalRecordingPrivilegeHandler *handler) override;
+      ZOOMSDK::IRequestLocalRecordingPrivilegeHandler* handler) override;
 
-  void onRequestCloudRecordingResponse(
-      ZOOMSDK::RequestStartCloudRecordingStatus status) override;
+  void onRequestCloudRecordingResponse(ZOOMSDK::RequestStartCloudRecordingStatus status) override;
   void onStartCloudRecordingRequested(
-      ZOOMSDK::IRequestStartCloudRecordingHandler *handler) override;
-  void onCloudRecordingStorageFull(time_t gracePeriodDate) override;
+      ZOOMSDK::IRequestStartCloudRecordingHandler* handler) override;
+  void onCloudRecordingStorageFull(time_t grace_period_date) override;
   void onEnableAndStartSmartRecordingRequested(
-      ZOOMSDK::IRequestEnableAndStartSmartRecordingHandler *handler) override;
+      ZOOMSDK::IRequestEnableAndStartSmartRecordingHandler* handler) override;
   void onSmartRecordingEnableActionCallback(
-      ZOOMSDK::ISmartRecordingEnableActionHandler *handler) override;
-  void onTranscodingStatusChanged(ZOOMSDK::TranscodingStatus status,
-                                  const zchar_t *path) override;
+      ZOOMSDK::ISmartRecordingEnableActionHandler* handler) override;
+  void onTranscodingStatusChanged(ZOOMSDK::TranscodingStatus status, const zchar_t* path) override;
 };
 
-#endif // HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H
+#endif  // HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H

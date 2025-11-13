@@ -2,18 +2,38 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/qieqieplus/headless-meeting-bot/server/pkg/audio"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
-	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoomsdk"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
 )
+
+const (
+	streamBufferSize       = 1000
+	videoStreamBufferSize  = 100
+	serverStartDelay       = 100 * time.Millisecond
+	readyNotificationDelay = 1 * time.Second
+	shutdownTimeout        = 3 * time.Second
+)
+
+func init() {
+	// Register types with GOB for efficient encoding/decoding
+	gob.Register(&stream.AudioEvent{})
+	gob.Register(&stream.Event{})
+	gob.Register(&stream.FileEvent{})
+	gob.Register(&zoombot.MeetingState{})
+}
 
 // WorkerConfig holds the configuration passed from the main server
 type WorkerConfig struct {
@@ -31,10 +51,13 @@ type WorkerConfig struct {
 
 // Worker manages a single meeting instance
 type Worker struct {
-	config   *WorkerConfig
-	instance *zoomsdk.MeetingInstance
-	audioBus *audio.Bus
-	server   *http.Server
+	config       *WorkerConfig
+	instance     *zoombot.MeetingInstance
+	audioBus     *stream.AudioBus
+	eventsBus    *stream.EventBus
+	videoBus     *stream.VideoBus
+	server       *http.Server
+	shutdownOnce sync.Once
 }
 
 func startWorker(configJSON string) {
@@ -61,15 +84,17 @@ func startWorker(configJSON string) {
 // NewWorker creates a new meeting worker
 func NewWorker(config *WorkerConfig) *Worker {
 	return &Worker{
-		config:   config,
-		audioBus: audio.NewBus(),
+		config:    config,
+		audioBus:  stream.NewAudioBus(),
+		eventsBus: stream.NewEventBus(),
+		videoBus:  stream.NewVideoBus(),
 	}
 }
 
 // Start starts the worker and joins the meeting
 func (w *Worker) Start() error {
 	// Create meeting instance
-	meetingConfig := &zoomsdk.MeetingConfig{
+	meetingConfig := &zoombot.MeetingConfig{
 		MeetingID:   w.config.MeetingID,
 		Password:    w.config.Password,
 		DisplayName: w.config.DisplayName,
@@ -80,18 +105,12 @@ func (w *Worker) Start() error {
 		SDKSecret:   w.config.SDKSecret,
 	}
 
-	w.instance = zoomsdk.NewMeetingInstance(meetingConfig, w.audioBus)
+	w.instance = zoombot.NewMeetingInstance(meetingConfig, w.audioBus, w.eventsBus, w.videoBus)
 
-	// Start HTTP server for status and audio streaming
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", w.handleHealth)
-	mux.HandleFunc("/status", w.handleStatus)
-	mux.HandleFunc("/stats", w.handleStats)
-	mux.HandleFunc("/audio", w.handleAudioStream)
-
+	// Start HTTP server for state, audio, events, and video streaming
 	w.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", w.config.WorkerPort),
-		Handler: mux,
+		Handler: w.setupRoutes(),
 	}
 
 	// Start HTTP server in background
@@ -103,7 +122,7 @@ func (w *Worker) Start() error {
 	}()
 
 	// Give server a moment to start
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(serverStartDelay)
 
 	// Start meeting
 	log.Infof("Joining meeting: %s", w.config.MeetingID)
@@ -117,72 +136,188 @@ func (w *Worker) Start() error {
 	return nil
 }
 
+// setupRoutes configures HTTP routes for the worker
+func (w *Worker) setupRoutes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", w.handleHealth)
+	mux.HandleFunc("/state", w.handleState)
+	mux.HandleFunc("/audio", w.handleAudioStream)
+	mux.HandleFunc("/events", w.handleEventsStream)
+	mux.HandleFunc("/video", w.handleVideoStream)
+	mux.HandleFunc("/shutdown", w.handleShutdown)
+	return mux
+}
+
+// shutdownBuses closes all buses to unblock stream handlers
+func (w *Worker) shutdownBuses() {
+	if w.audioBus != nil {
+		w.audioBus.Shutdown()
+	}
+	if w.eventsBus != nil {
+		w.eventsBus.Shutdown()
+	}
+	if w.videoBus != nil {
+		w.videoBus.Shutdown()
+	}
+}
+
+// streamGOB is a generic helper for streaming GOB-encoded data from a subscriber
+func streamGOB[T any](
+	rw http.ResponseWriter,
+	r *http.Request,
+	streamType string,
+	meetingID string,
+	subscriberID string,
+	subscribe func(),
+	unsubscribe func(),
+	channel <-chan T,
+	cleanup func(T),
+) {
+	// Set headers for streaming
+	contentType := "application/x-gob"
+	if streamType == "audio" {
+		contentType = "application/octet-stream"
+	}
+	rw.Header().Set("Content-Type", contentType)
+
+	flusher, ok := rw.(http.Flusher)
+	if !ok {
+		server.WriteJSONError(rw, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	subscribe()
+	defer unsubscribe()
+
+	enc := gob.NewEncoder(rw)
+	log.Infof("%s stream started for meeting: %s", streamType, meetingID)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			log.Infof("%s stream cancelled for meeting: %s", streamType, meetingID)
+			return
+		case item, ok := <-channel:
+			if !ok {
+				log.Infof("%s stream ended for meeting: %s", streamType, meetingID)
+				return
+			}
+
+			if err := enc.Encode(item); err != nil {
+				log.Errorf("Failed to encode %s item: %v", streamType, err)
+				if cleanup != nil {
+					cleanup(item)
+				}
+				return
+			}
+
+			flusher.Flush()
+			if cleanup != nil {
+				cleanup(item)
+			}
+		}
+	}
+}
+
 // handleHealth returns health status
 func (w *Worker) handleHealth(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(http.StatusOK)
 	json.NewEncoder(rw).Encode(map[string]interface{}{
 		"status": "ok",
 		"pid":    os.Getpid(),
 	})
 }
 
-// handleStatus returns meeting status
-func (w *Worker) handleStatus(rw http.ResponseWriter, r *http.Request) {
-	status := w.instance.GetStatus()
-	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(map[string]interface{}{
-		"meeting_id": w.config.MeetingID,
-		"status":     status.String(),
-	})
+// handleState returns meeting state based on mask query parameter
+func (w *Worker) handleState(rw http.ResponseWriter, r *http.Request) {
+	// Parse mask from query parameter, default to StateAll if not provided
+	mask := zoombot.StateAll
+	if maskStr := r.URL.Query().Get("mask"); maskStr != "" {
+		var maskVal uint32
+		if _, err := fmt.Sscanf(maskStr, "%d", &maskVal); err == nil {
+			mask = zoombot.StateMask(maskVal)
+		}
+	}
+
+	state := zoombot.MeetingState{
+		MeetingID: w.config.MeetingID,
+	}
+
+	if mask&zoombot.StateStatus != 0 {
+		state.Status = w.instance.GetStatusInfo()
+	}
+
+	if mask&zoombot.StateStatistics != 0 {
+		state.Statistics = w.instance.GetStatistics()
+	}
+
+	if mask&zoombot.StateUsers != 0 {
+		state.Users = w.instance.GetUsers()
+	}
+
+	rw.Header().Set("Content-Type", "application/x-gob")
+	rw.WriteHeader(http.StatusOK)
+	if err := gob.NewEncoder(rw).Encode(state); err != nil {
+		log.Errorf("Failed to encode state: %v", err)
+	}
 }
 
-// handleStats returns meeting statistics
-func (w *Worker) handleStats(rw http.ResponseWriter, r *http.Request) {
-	stats := w.instance.GetStats()
+// handleShutdown triggers a graceful shutdown
+func (w *Worker) handleShutdown(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(stats)
+	rw.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(rw).Encode(map[string]string{"status": "shutting-down"})
+	go w.Shutdown()
 }
 
 // handleAudioStream streams audio frames to the client
 func (w *Worker) handleAudioStream(rw http.ResponseWriter, r *http.Request) {
-	// Set headers for streaming
-	rw.Header().Set("Content-Type", "application/octet-stream")
-	rw.Header().Set("Transfer-Encoding", "chunked")
-
-	flusher, ok := rw.(http.Flusher)
-	if !ok {
-		http.Error(rw, "Streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Subscribe to audio bus
 	subscriberID := fmt.Sprintf("worker-%s-%s", w.config.MeetingID, r.RemoteAddr)
-	subscriber := audio.NewSubscriber(subscriberID, 1000)
+	subscriber := stream.NewAudioSubscriber(subscriberID, streamBufferSize)
 	subscriber.SetMeetingFilter(w.config.MeetingID)
-	w.audioBus.Subscribe(subscriber)
-	defer w.audioBus.Unsubscribe(subscriberID)
 
-	log.Infof("Audio stream started for meeting: %s", w.config.MeetingID)
+	streamGOB(rw, r, "audio", w.config.MeetingID, subscriberID,
+		func() { w.audioBus.Subscribe(subscriber) },
+		func() { w.audioBus.Unsubscribe(subscriberID) },
+		subscriber.Channel(),
+		func(item *stream.AudioEvent) {
+			item.Release()
+		},
+	)
+}
 
-	// Stream frames
-	for frame := range subscriber.Channel {
-		// Encode frame as JSON with newline delimiter
-		frameData, err := json.Marshal(frame)
-		if err != nil {
-			log.Errorf("Failed to marshal audio frame: %v", err)
-			continue
-		}
+// handleEventsStream streams events (meeting status and user events) to the client
+func (w *Worker) handleEventsStream(rw http.ResponseWriter, r *http.Request) {
+	subscriberID := fmt.Sprintf("worker-events-%s-%s", w.config.MeetingID, r.RemoteAddr)
+	subscriber := stream.NewEventSubscriber(subscriberID, streamBufferSize)
+	subscriber.SetMeetingFilter(w.config.MeetingID)
 
-		// Write frame with newline delimiter
-		if _, err := fmt.Fprintf(rw, "%s\n", frameData); err != nil {
-			log.Errorf("Failed to write audio frame: %v", err)
-			break
-		}
+	streamGOB(rw, r, "events", w.config.MeetingID, subscriberID,
+		func() { w.eventsBus.Subscribe(subscriber) },
+		func() { w.eventsBus.Unsubscribe(subscriberID) },
+		subscriber.Channel(),
+		nil,
+	)
+}
 
-		flusher.Flush()
-	}
+// handleVideoStream streams video files to the client
+func (w *Worker) handleVideoStream(rw http.ResponseWriter, r *http.Request) {
+	subscriberID := fmt.Sprintf("worker-video-%s-%s", w.config.MeetingID, r.RemoteAddr)
+	subscriber := stream.NewVideoSubscriber(subscriberID, videoStreamBufferSize)
+	subscriber.SetMeetingFilter(w.config.MeetingID)
 
-	log.Infof("Audio stream ended for meeting: %s", w.config.MeetingID)
+	streamGOB(rw, r, "video", w.config.MeetingID, subscriberID,
+		func() { w.videoBus.Subscribe(subscriber) },
+		func() { w.videoBus.Unsubscribe(subscriberID) },
+		subscriber.Channel(),
+		func(item *stream.FileEvent) {
+			if item.IsPlaylist {
+				log.Infof("[video] worker sending playlist: meeting=%s file=%s len=%d", w.config.MeetingID, item.Filename, len(item.Data))
+			}
+			item.Release()
+		},
+	)
 }
 
 // notifyReady sends a notification to the callback URL when ready
@@ -191,8 +326,7 @@ func (w *Worker) notifyReady() {
 		return
 	}
 
-	// Wait a bit
-	time.Sleep(1 * time.Second)
+	time.Sleep(readyNotificationDelay)
 
 	// Send ready notification
 	data := map[string]interface{}{
@@ -219,28 +353,36 @@ func (w *Worker) notifyReady() {
 
 // WaitForShutdown waits for a shutdown signal
 func (w *Worker) WaitForShutdown() {
-	// Create channel to listen for OS signals
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	// Block until a signal is received
 	<-stop
 
-	log.Info("Shutting down worker...")
+	w.Shutdown()
+}
 
-	// Stop meeting
-	if w.instance != nil {
-		if err := w.instance.Stop(); err != nil {
-			log.Errorf("Error stopping meeting: %v", err)
+// Shutdown performs a graceful shutdown of the worker
+func (w *Worker) Shutdown() {
+	w.shutdownOnce.Do(func() {
+		log.Info("Shutting down worker...")
+
+		if w.instance != nil {
+			if err := w.instance.Stop(); err != nil {
+				log.Errorf("Error stopping meeting: %v", err)
+			}
 		}
-	}
 
-	// Shutdown HTTP server
-	if w.server != nil {
-		if err := w.server.Close(); err != nil {
-			log.Errorf("Error shutting down HTTP server: %v", err)
+		// Close all buses to unblock stream handlers immediately
+		w.shutdownBuses()
+
+		if w.server != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			if err := w.server.Shutdown(ctx); err != nil {
+				log.Errorf("Error shutting down HTTP server: %v", err)
+			}
 		}
-	}
 
-	log.Info("Worker shutdown complete")
+		log.Info("Worker shutdown complete")
+	})
 }

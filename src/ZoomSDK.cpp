@@ -1,181 +1,172 @@
 #include "ZoomSDK.h"
+
+#include <cstdlib>
+
 #include "Meeting.h"
 #include "MeetingConfig.h"
 #include "util/Checks.h"
 #include "util/Logger.h"
-#include <cstdlib>
 
 using namespace ZOOMSDK;
 
 ZoomSDK::ZoomSDK()
-    : m_authService(nullptr), m_settingService(nullptr),
-      m_networkHelper(nullptr), m_meetingService(nullptr),
-      m_isInitialized(false), m_isAuthenticated(false) {}
+    : auth_service_(nullptr),
+      setting_service_(nullptr),
+      network_helper_(nullptr),
+      meeting_service_(nullptr),
+      is_initialized_(false),
+      is_authenticated_(false) {}
 
-ZoomSDK::~ZoomSDK() { cleanup(); }
+ZoomSDK::~ZoomSDK() noexcept { (void)Cleanup(); }
 
-SDKError ZoomSDK::initialize(const SDKConfig &config) {
-  return initialize(config.sdkKey(), config.sdkSecret(), config.zoomHost());
+SDKError ZoomSDK::Initialize(const SDKConfig& config) {
+  return Initialize(config.SdkKey(), config.SdkSecret(), config.ZoomHost());
 }
 
-SDKError ZoomSDK::initialize(const std::string &sdkKey,
-                             const std::string &sdkSecret,
-                             const std::string &zoomHost) {
-  if (m_isInitialized) {
+SDKError ZoomSDK::Initialize(const std::string& sdk_key, const std::string& sdk_secret,
+                             const std::string& zoom_host) {
+  if (is_initialized_) {
     return SDKERR_SUCCESS;
   }
 
-  if (sdkKey.empty() || sdkSecret.empty()) {
+  if (sdk_key.empty() || sdk_secret.empty()) {
     return SDKERR_UNINITIALIZE;
   }
 
-  m_sdkKey = sdkKey;
-  m_sdkSecret = sdkSecret;
-  m_zoomHost = zoomHost;
+  sdk_key_ = sdk_key;
+  sdk_secret_ = sdk_secret;
+  zoom_host_ = zoom_host;
 
-  InitParam initParam;
+  InitParam init_param;
 
-  auto host = m_zoomHost.c_str();
+  auto host = zoom_host_.c_str();
 
-  initParam.strWebDomain = host;
-  initParam.strSupportUrl = host;
+  init_param.strWebDomain = host;
+  init_param.strSupportUrl = host;
 
-  initParam.emLanguageID = LANGUAGE_English;
+  init_param.emLanguageID = LANGUAGE_English;
 
-  initParam.enableLogByDefault = true;
-  initParam.enableGenerateDump = true;
+  init_param.enableLogByDefault = true;
+  init_param.enableGenerateDump = true;
 
-  ZOOM_ERR_CHECK(InitSDK(initParam), "initialize SDK");
+  ZOOM_ERR_CHECK(InitSDK(init_param), "initialize SDK");
 
-  ZOOM_ERR_CHECK(createGlobalServices(), "create global services");
+  ZOOM_ERR_CHECK(CreateGlobalServices(), "create global services");
 
-  m_isInitialized = true;
-  Logger::getInstance().success("SDK initialized successfully");
+  is_initialized_ = true;
+  Logger::GetInstance().Success("SDK initialized successfully");
 
   return SDKERR_SUCCESS;
 }
 
-SDKError ZoomSDK::createGlobalServices() {
+SDKError ZoomSDK::CreateGlobalServices() {
   SDKError err;
 
-  ZOOM_ERR_CHECK(CreateSettingService(&m_settingService),
-                 "create setting service");
+  ZOOM_ERR_CHECK(CreateSettingService(&setting_service_), "create setting service");
 
-  ZOOM_ERR_CHECK(CreateNetworkConnectionHelper(&m_networkHelper),
+  ZOOM_ERR_CHECK(CreateNetworkConnectionHelper(&network_helper_),
                  "create network connection helper");
 
   // Configure proxy settings
   ProxySettings proxy_setting;
   proxy_setting.auto_detect = true;
 
-  if (const char *proxy_env = getenv("HTTP_PROXY")) {
+  if (const char* proxy_env = getenv("HTTP_PROXY")) {
     proxy_setting.auto_detect = false;
     proxy_setting.proxy = proxy_env;
-    Logger::getInstance().info("Proxy found: " + std::string(proxy_env));
+    Logger::GetInstance().Info("Proxy found: " + std::string(proxy_env));
   }
 
-  m_networkHelper->ConfigureProxy(proxy_setting);
+  network_helper_->ConfigureProxy(proxy_setting);
 
-  ZOOM_ERR_CHECK(CreateMeetingService(&m_meetingService),
-                 "create meeting service");
+  ZOOM_ERR_CHECK(CreateMeetingService(&meeting_service_), "create meeting service");
 
   return SDKERR_SUCCESS;
 }
 
-SDKError ZoomSDK::authenticate(std::function<void()> onAuthCallback) {
-  if (!m_isInitialized) {
+SDKError ZoomSDK::Authenticate(std::function<void()> on_auth_callback) {
+  if (!is_initialized_) {
     return SDKERR_UNINITIALIZE;
   }
 
-  if (m_isAuthenticated) {
-    if (onAuthCallback)
-      onAuthCallback();
+  if (is_authenticated_) {
+    if (on_auth_callback) {
+      on_auth_callback();
+    }
     return SDKERR_SUCCESS;
   }
 
   SDKError err;
 
-  ZOOM_ERR_CHECK(CreateAuthService(&m_authService), "create auth service");
+  ZOOM_ERR_CHECK(CreateAuthService(&auth_service_), "create auth service");
 
-  m_onAuthCallback = onAuthCallback;
+  on_auth_callback_ = on_auth_callback;
 
-  std::function<void()> onAuth = [this]() {
-    m_isAuthenticated = true;
-    Logger::getInstance().success("SDK authenticated successfully");
-    if (m_onAuthCallback) {
-      m_onAuthCallback();
+  std::function<void()> on_auth = [this]() {
+    is_authenticated_ = true;
+    Logger::GetInstance().Success("SDK authenticated successfully");
+    if (on_auth_callback_) {
+      on_auth_callback_();
     }
   };
 
-  m_authEvent = std::make_unique<AuthServiceEvent>(onAuth);
-  ZOOM_ERR_CHECK(m_authService->SetEvent(m_authEvent.get()), "set auth event");
+  auth_event_ = std::make_unique<AuthServiceEvent>(on_auth);
+  ZOOM_ERR_CHECK(auth_service_->SetEvent(auth_event_.get()), "set auth event");
 
-  generateJWT(m_sdkKey, m_sdkSecret);
+  GenerateJwt(sdk_key_, sdk_secret_);
 
   AuthContext ctx;
-  ctx.jwt_token = m_jwt.c_str();
+  ctx.jwt_token = jwt_.c_str();
 
-  return m_authService->SDKAuth(ctx);
+  return auth_service_->SDKAuth(ctx);
 }
 
-void ZoomSDK::generateJWT(const std::string &key, const std::string &secret) {
-  m_iat = std::chrono::system_clock::now();
-  m_exp = m_iat + std::chrono::hours{24};
+void ZoomSDK::GenerateJwt(const std::string& key, const std::string& secret) {
+  iat_ = std::chrono::system_clock::now();
+  exp_ = iat_ + std::chrono::hours{24};
 
-  m_jwt = jwt::create()
-              .set_type("JWT")
-              .set_issued_at(m_iat)
-              .set_expires_at(m_exp)
-              .set_payload_claim("appKey", jwt::claim(key))
-              .set_payload_claim("tokenExp", jwt::claim(m_exp))
-              .sign(jwt::algorithm::hs256{secret});
+  jwt_ = jwt::create()
+             .set_type("JWT")
+             .set_issued_at(iat_)
+             .set_expires_at(exp_)
+             .set_payload_claim("appKey", jwt::claim(key))
+             .set_payload_claim("tokenExp", jwt::claim(exp_))
+             .sign(jwt::algorithm::hs256{secret});
 }
 
-SDKError ZoomSDK::cleanup() {
-  if (m_meetingService) {
-    DestroyMeetingService(m_meetingService);
-    m_meetingService = nullptr;
+SDKError ZoomSDK::Cleanup() noexcept {
+  if (meeting_service_) {
+    DestroyMeetingService(meeting_service_);
+    meeting_service_ = nullptr;
   }
 
-  if (m_settingService) {
-    DestroySettingService(m_settingService);
-    m_settingService = nullptr;
+  if (setting_service_) {
+    DestroySettingService(setting_service_);
+    setting_service_ = nullptr;
   }
 
-  if (m_authService) {
-    m_authService->SetEvent(nullptr);
-    DestroyAuthService(m_authService);
-    m_authService = nullptr;
+  if (auth_service_) {
+    auth_service_->SetEvent(nullptr);
+    DestroyAuthService(auth_service_);
+    auth_service_ = nullptr;
   }
 
-  m_authEvent.reset();
+  auth_event_.reset();
+  on_auth_callback_ = nullptr;
 
-  if (m_networkHelper) {
-    DestroyNetworkConnectionHelper(m_networkHelper);
-    m_networkHelper = nullptr;
+  if (network_helper_) {
+    DestroyNetworkConnectionHelper(network_helper_);
+    network_helper_ = nullptr;
   }
 
-  if (m_isInitialized) {
-    CleanUPSDK();
-    m_isInitialized = false;
+  if (is_initialized_) {
+    // avoid Zoom internal bugs
+    // CleanUPSDK();
+    is_initialized_ = false;
   }
 
-  m_isAuthenticated = false;
+  is_authenticated_ = false;
+  jwt_.clear();
 
   return SDKERR_SUCCESS;
-}
-
-bool ZoomSDK::hasError(const SDKError e, const std::string &action) {
-  auto isError = e != SDKERR_SUCCESS;
-
-  if (!action.empty()) {
-    if (isError) {
-      std::stringstream ss;
-      ss << "failed to " << action << " with status " << e;
-      Logger::getInstance().error(ss.str());
-    } else {
-      Logger::getInstance().success(action);
-    }
-  }
-  return isError;
 }

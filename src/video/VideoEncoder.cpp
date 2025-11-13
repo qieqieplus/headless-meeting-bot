@@ -1,26 +1,28 @@
 #include "VideoEncoder.h"
-#include "util/Logger.h"
+
 #include <cstring>
+
+#include "util/Logger.h"
 
 VideoEncoder::VideoEncoder() = default;
 
-VideoEncoder::~VideoEncoder() { shutdown(); }
+VideoEncoder::~VideoEncoder() { Shutdown(); }
 
-bool VideoEncoder::initialize(const VideoEncoderConfig &config) {
-  currentConfig = config;
-  return openEncoder();
+bool VideoEncoder::Initialize(const VideoEncoderConfig& config) {
+  videoConfig_ = config;
+  return OpenEncoder();
 }
 
-bool VideoEncoder::reinitialize(const VideoEncoderConfig &config) {
-  shutdown();
-  currentConfig = config;
-  return openEncoder();
+bool VideoEncoder::Reinitialize(const VideoEncoderConfig& config) {
+  Shutdown();
+  videoConfig_ = config;
+  return OpenEncoder();
 }
 
-void VideoEncoder::shutdown() { closeEncoder(); }
+void VideoEncoder::Shutdown() { CloseEncoder(); }
 
-const AVCodec *VideoEncoder::selectCodec(const std::string &encoder) {
-  const AVCodec *codec = nullptr;
+const AVCodec* VideoEncoder::SelectCodec(const std::string& encoder) {
+  const AVCodec* codec = nullptr;
 
   if (encoder == "nvenc") {
     codec = avcodec_find_encoder_by_name("h264_nvenc");
@@ -31,37 +33,42 @@ const AVCodec *VideoEncoder::selectCodec(const std::string &encoder) {
   }
 
   if (codec) {
-    Logger::getInstance().info(std::string("Encoder: ") + codec->name);
+    Logger::GetInstance().Info(std::string("Encoder: ") + codec->name);
   } else {
-    Logger::getInstance().error("No H.264 encoder available");
+    Logger::GetInstance().Error("No H.264 encoder available");
   }
 
   return codec;
 }
 
-bool VideoEncoder::configureEncoder(AVCodecContext *ctx, const AVCodec *codec) {
-  ctx->width = currentConfig.width;
-  ctx->height = currentConfig.height;
-  ctx->time_base = AVRational{1, 1000000}; // microseconds
-  ctx->framerate = AVRational{currentConfig.fps, 1};
+bool VideoEncoder::ConfigureEncoder(AVCodecContext* ctx, const AVCodec* codec) {
+  if (videoConfig_.fps <= 0) {
+    constexpr int kDefaultAutoFps = 10;
+    videoConfig_.fps = kDefaultAutoFps;
+  }
+
+  ctx->width = videoConfig_.width;
+  ctx->height = videoConfig_.height;
+  ctx->time_base = AVRational{1, 1000000};  // microseconds
+  ctx->framerate = AVRational{videoConfig_.fps, 1};
   ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-  ctx->bit_rate = currentConfig.bitrateKbps * 1000;
-  ctx->gop_size = currentConfig.fps * currentConfig.gopSeconds;
-  ctx->max_b_frames = 0; // No B-frames for low latency
+  ctx->bit_rate = videoConfig_.bitrate_kbps * 1000;
+  ctx->gop_size = videoConfig_.gop_size;
+  ctx->max_b_frames = 0;  // No B-frames for low latency
 
-  bool isNvenc = (strstr(codec->name, "nvenc") != nullptr);
+  bool is_nvenc = (strstr(codec->name, "nvenc") != nullptr);
 
-  if (isNvenc) {
+  if (is_nvenc) {
     // NVENC-specific options
     av_opt_set(ctx->priv_data, "preset", "fast", 0);
     av_opt_set(ctx->priv_data, "rc", "cbr_ld_hq", 0);
     av_opt_set(ctx->priv_data, "zerolatency", "1", 0);
-    av_opt_set(ctx->priv_data, "profile", currentConfig.profile.c_str(), 0);
+    av_opt_set(ctx->priv_data, "profile", videoConfig_.profile.c_str(), 0);
   } else {
     // libx264 options
-    av_opt_set(ctx->priv_data, "preset", currentConfig.preset.c_str(), 0);
+    av_opt_set(ctx->priv_data, "preset", videoConfig_.preset.c_str(), 0);
     av_opt_set(ctx->priv_data, "tune", "zerolatency", 0);
-    av_opt_set(ctx->priv_data, "profile", currentConfig.profile.c_str(), 0);
+    av_opt_set(ctx->priv_data, "profile", videoConfig_.profile.c_str(), 0);
   }
 
   // Global header for MP4/HLS
@@ -70,168 +77,221 @@ bool VideoEncoder::configureEncoder(AVCodecContext *ctx, const AVCodec *codec) {
   return true;
 }
 
-bool VideoEncoder::openEncoder() {
-  if (currentConfig.width <= 0 || currentConfig.height <= 0 ||
-      currentConfig.fps <= 0) {
-    Logger::getInstance().error("Invalid encoder config");
+bool VideoEncoder::OpenEncoder() {
+  if (videoConfig_.width <= 0 || videoConfig_.height <= 0) {
+    Logger::GetInstance().Error("Encoder requires a valid width and height");
     return false;
   }
 
-  const AVCodec *codec = selectCodec(currentConfig.encoder);
-  if (!codec)
-    return false;
-
-  codecCtx = avcodec_alloc_context3(codec);
-  if (!codecCtx) {
-    Logger::getInstance().error("Failed to allocate codec context");
+  const AVCodec* codec = SelectCodec(videoConfig_.encoder);
+  if (!codec) {
     return false;
   }
 
-  if (!configureEncoder(codecCtx, codec)) {
-    closeEncoder();
+  codecCtx_ = avcodec_alloc_context3(codec);
+  if (!codecCtx_) {
+    Logger::GetInstance().Error("Failed to allocate codec context");
     return false;
   }
 
-  if (avcodec_open2(codecCtx, codec, nullptr) < 0) {
-    Logger::getInstance().error("Failed to open codec");
-    closeEncoder();
+  if (!ConfigureEncoder(codecCtx_, codec)) {
+    CloseEncoder();
     return false;
   }
 
-  frame = av_frame_alloc();
-  if (!frame) {
-    Logger::getInstance().error("Failed to allocate frame");
-    closeEncoder();
+  if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
+    Logger::GetInstance().Error("Failed to open codec");
+    CloseEncoder();
     return false;
   }
 
-  frame->format = codecCtx->pix_fmt;
-  frame->width = codecCtx->width;
-  frame->height = codecCtx->height;
-
-  if (av_frame_get_buffer(frame, 0) < 0) {
-    Logger::getInstance().error("Failed to allocate frame buffer");
-    closeEncoder();
+  frame_ = av_frame_alloc();
+  if (!frame_) {
+    Logger::GetInstance().Error("Failed to allocate frame");
+    CloseEncoder();
     return false;
   }
 
-  pkt = av_packet_alloc();
-  if (!pkt) {
-    Logger::getInstance().error("Failed to allocate packet");
-    closeEncoder();
+  frame_->format = codecCtx_->pix_fmt;
+  frame_->width = codecCtx_->width;
+  frame_->height = codecCtx_->height;
+
+  if (av_frame_get_buffer(frame_, 0) < 0) {
+    Logger::GetInstance().Error("Failed to allocate frame buffer");
+    CloseEncoder();
     return false;
   }
 
   // Calculate and cache frame duration based on framerate and time_base
-  if (codecCtx->framerate.num > 0 && codecCtx->framerate.den > 0) {
-    AVRational frameRate = codecCtx->framerate;
-    frameDuration = av_rescale_q(1, av_inv_q(frameRate), codecCtx->time_base);
+  if (codecCtx_->framerate.num > 0 && codecCtx_->framerate.den > 0) {
+    AVRational frame_rate = codecCtx_->framerate;
+    frameDuration_ = av_rescale_q(1, av_inv_q(frame_rate), codecCtx_->time_base);
   } else {
-    frameDuration = 0;
+    frameDuration_ = 0;
   }
 
-  frameCount = 0;
-  Logger::getInstance().success("FFmpeg encoder initialized successfully");
+  frameCount_ = 0;
+  Logger::GetInstance().Success("FFmpeg encoder initialized successfully");
   return true;
 }
 
-void VideoEncoder::closeEncoder() {
+void VideoEncoder::CloseEncoder() {
   /*
   if (swsCtx) {
       sws_freeContext(swsCtx);
       swsCtx = nullptr;
   }
   */
-  if (pkt) {
+  // Clear packet queue
+  while (!packetQueue_.empty()) {
+    AVPacket* pkt = packetQueue_.front();
+    packetQueue_.pop();
     av_packet_free(&pkt);
-    pkt = nullptr;
   }
-  if (frame) {
-    av_frame_free(&frame);
-    frame = nullptr;
+
+  if (frame_) {
+    av_frame_free(&frame_);
+    frame_ = nullptr;
   }
-  if (codecCtx) {
-    avcodec_free_context(&codecCtx);
-    codecCtx = nullptr;
+  if (codecCtx_) {
+    avcodec_free_context(&codecCtx_);
+    codecCtx_ = nullptr;
   }
-  frameCount = 0;
-  frameDuration = 0;
+  frameCount_ = 0;
+  frameDuration_ = 0;
 }
 
-AVFrame *VideoEncoder::convertToAVFrame(const uint8_t *yPlane,
-                                        const uint8_t *uPlane,
-                                        const uint8_t *vPlane, int width,
-                                        int height, int64_t ptsUs) {
-  if (!frame || !codecCtx)
-    return nullptr;
-
-  if (av_frame_make_writable(frame) < 0) {
-    Logger::getInstance().error("Failed to make frame writable");
-    return nullptr;
-  }
-
-  // Copy I420 planes to AVFrame
-  int yStride = frame->linesize[0];
-  int uStride = frame->linesize[1];
-  int vStride = frame->linesize[2];
-
-  for (int y = 0; y < height; ++y) {
-    std::memcpy(frame->data[0] + y * yStride, yPlane + y * width, width);
-  }
-
-  int chromaHeight = height / 2;
-  int chromaWidth = width / 2;
-  for (int y = 0; y < chromaHeight; ++y) {
-    std::memcpy(frame->data[1] + y * uStride, uPlane + y * chromaWidth,
-                chromaWidth);
-    std::memcpy(frame->data[2] + y * vStride, vPlane + y * chromaWidth,
-                chromaWidth);
-  }
-
-  frame->pts = ptsUs;
-
-  if (forceKeyframe.exchange(false)) {
-    frame->pict_type = AV_PICTURE_TYPE_I;
-    // frame->flags |= AV_FRAME_FLAG_KEY;
+namespace {
+// Helper function to copy plane data with optimal strategy
+inline void CopyPlaneData(uint8_t* dst, int dst_stride, const uint8_t* src, int src_width,
+                          int height) {
+  if (dst_stride == src_width) {
+    // Fast path: single contiguous copy when strides match
+    std::memcpy(dst, src, static_cast<size_t>(src_width) * height);
   } else {
-    frame->pict_type = AV_PICTURE_TYPE_NONE;
+    // Stride mismatch: copy row by row
+    for (int y = 0; y < height; ++y) {
+      std::memcpy(dst + y * dst_stride, src + y * src_width, src_width);
+    }
+  }
+}
+}  // namespace
+
+AVFrame* VideoEncoder::ConvertToAvFrame(const uint8_t* y_plane, const uint8_t* u_plane,
+                                        const uint8_t* v_plane, int width, int height,
+                                        int64_t pts_us) {
+  if (!frame_ || !codecCtx_) {
+    return nullptr;
   }
 
-  return frame;
+  if (av_frame_make_writable(frame_) < 0) {
+    Logger::GetInstance().Error("Failed to make frame writable");
+    return nullptr;
+  }
+
+  // Copy I420 planes to AVFrame using optimized helper
+  CopyPlaneData(frame_->data[0], frame_->linesize[0], y_plane, width, height);
+
+  int chroma_width = width / 2;
+  int chroma_height = height / 2;
+  CopyPlaneData(frame_->data[1], frame_->linesize[1], u_plane, chroma_width, chroma_height);
+  CopyPlaneData(frame_->data[2], frame_->linesize[2], v_plane, chroma_width, chroma_height);
+
+  frame_->pts = pts_us;
+
+  if (forceKeyframe_.exchange(false)) {
+    frame_->pict_type = AV_PICTURE_TYPE_I;
+    // frame_->flags |= AV_FRAME_FLAG_KEY;
+  } else {
+    frame_->pict_type = AV_PICTURE_TYPE_NONE;
+  }
+
+  return frame_;
 }
 
-AVPacket *VideoEncoder::encodeI420(const uint8_t *yPlane, const uint8_t *uPlane,
-                                   const uint8_t *vPlane, int width, int height,
-                                   int64_t ptsUs) {
-  if (!codecCtx || !frame || !pkt)
-    return nullptr;
-
-  if (width != currentConfig.width || height != currentConfig.height) {
-    Logger::getInstance().error("Frame dimensions don't match encoder config");
-    return nullptr;
+bool VideoEncoder::EncodeI420(const uint8_t* y_plane, const uint8_t* u_plane,
+                              const uint8_t* v_plane, int width, int height, int64_t pts_us) {
+  if (!codecCtx_ || !frame_) {
+    return false;
   }
 
-  AVFrame *inputFrame =
-      convertToAVFrame(yPlane, uPlane, vPlane, width, height, ptsUs);
-  if (!inputFrame)
-    return nullptr;
+  if (width != videoConfig_.width || height != videoConfig_.height) {
+    Logger::GetInstance().Error("Frame dimensions don't match encoder config");
+    return false;
+  }
 
-  int ret = avcodec_send_frame(codecCtx, inputFrame);
+  AVFrame* input_frame = ConvertToAvFrame(y_plane, u_plane, v_plane, width, height, pts_us);
+  if (!input_frame) {
+    return false;
+  }
+
+  // Send frame to encoder
+  int ret = avcodec_send_frame(codecCtx_, input_frame);
   if (ret < 0) {
-    Logger::getInstance().error("Error sending frame to encoder");
-    return nullptr;
+    Logger::GetInstance().Error("Error sending frame to encoder");
+    return false;
   }
 
-  ret = avcodec_receive_packet(codecCtx, pkt);
-  if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-    return nullptr; // Need more frames or encoder flushed
-  } else if (ret < 0) {
-    Logger::getInstance().error("Error receiving packet from encoder");
-    return nullptr;
-  }
-
-  frameCount++;
-  return pkt; // Caller must call av_packet_unref(pkt)
+  // Drain all available packets from encoder
+  // Note: The encoder may buffer frames, so we might get 0, 1, or multiple
+  // packets
+  DrainPackets();
+  return true;
 }
 
-void VideoEncoder::requestIDR() { forceKeyframe.store(true); }
+void VideoEncoder::DrainPackets() {
+  if (!codecCtx_) {
+    return;
+  }
+
+  while (true) {
+    AVPacket* pkt = av_packet_alloc();
+    if (!pkt) {
+      Logger::GetInstance().Error("Failed to allocate packet");
+      break;
+    }
+
+    int ret = avcodec_receive_packet(codecCtx_, pkt);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+      // No more packets available right now (EAGAIN) or encoder flushed (EOF)
+      av_packet_free(&pkt);
+      break;
+    } else if (ret < 0) {
+      Logger::GetInstance().Error("Error receiving packet from encoder");
+      av_packet_free(&pkt);
+      break;
+    }
+
+    // Successfully received a packet - add to queue
+    packetQueue_.push(pkt);
+    frameCount_++;
+  }
+}
+
+AVPacket* VideoEncoder::GetNextPacket() {
+  if (packetQueue_.empty()) {
+    return nullptr;
+  }
+
+  AVPacket* pkt = packetQueue_.front();
+  packetQueue_.pop();
+  return pkt;  // Caller must call av_packet_free()
+}
+
+void VideoEncoder::Flush() {
+  if (!codecCtx_) {
+    return;
+  }
+
+  // Send NULL frame to signal end of stream
+  int ret = avcodec_send_frame(codecCtx_, nullptr);
+  if (ret < 0 && ret != AVERROR_EOF) {
+    Logger::GetInstance().Error("Error flushing encoder");
+    return;
+  }
+
+  // Drain all remaining packets
+  DrainPackets();
+}
+
+void VideoEncoder::RequestIdr() { forceKeyframe_.store(true); }

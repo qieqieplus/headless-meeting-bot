@@ -1,4 +1,7 @@
 #include "MediaController.h"
+
+#include <algorithm>
+
 #include "util/Checks.h"
 #include "util/Logger.h"
 #include "video/AudioEncoder.h"
@@ -6,271 +9,440 @@
 #include "video/MediaEncodePipeline.h"
 #include "video/VideoEncoder.h"
 
-#include <algorithm>
-
 using namespace ZOOMSDK;
 
-MediaController::MediaController()
-    : m_audioHelper(nullptr), m_audioDelegate(nullptr), m_videoHelper(nullptr),
-      m_videoDelegate(nullptr), m_isRecording(false) {}
-
-MediaController::~MediaController() { stopMedia(); }
-
-void MediaController::setAudioDelegate(IZoomSDKAudioRawDataDelegate *delegate) {
-  m_audioDelegate = delegate;
+MediaController::MediaController(const std::string& meeting_id)
+    : config_(meeting_id),
+      is_recording_(false),
+      recording_controller_(nullptr),
+      use_raw_audio_(false),
+      use_raw_video_(false) {
+  audio_helper_ = nullptr;
 }
 
-void MediaController::setVideoDelegate(IZoomSDKRendererDelegate *delegate) {
-  m_videoDelegate = delegate;
+MediaController::~MediaController() noexcept {
+  CleanupRecording();
+  StopMedia();
 }
 
-void MediaController::setHlsMediaParams(const VideoEncoderConfig &videoEncCfg,
-                                        const AudioEncoderConfig &audioEncCfg,
-                                        const HlsMuxerConfig &muxCfg,
-                                        HlsFileCallback cb) {
-  std::lock_guard<std::mutex> lock(m_mediaMtx);
-  m_videoEncoderCfg = std::make_unique<VideoEncoderConfig>(videoEncCfg);
-  m_audioEncoderCfg = std::make_unique<AudioEncoderConfig>(audioEncCfg);
-  m_muxerCfg = std::make_unique<HlsMuxerConfig>(muxCfg);
-  m_hlsFileCallback = std::move(cb);
+void MediaController::SetAudioDelegate(std::unique_ptr<IZoomSDKAudioRawDataDelegate> delegate) {
+  audio_delegate_ = std::move(delegate);
 }
 
-void MediaController::clearHlsMediaParams() {
-  std::lock_guard<std::mutex> lock(m_mediaMtx);
-  m_videoEncoderCfg.reset();
-  m_audioEncoderCfg.reset();
-  m_muxerCfg.reset();
-  m_hlsFileCallback = nullptr;
-  m_audioCallback = nullptr;
-}
+SDKError MediaController::StartMedia(bool use_raw_audio, bool use_raw_video,
+                                     const std::vector<ZoomSDKSharingSourceInfo>& initial_shares) {
+  const bool was_recording = is_recording_.load(std::memory_order_acquire);
 
-SDKError MediaController::startMedia(
-    bool useRawAudio, bool useRawVideo,
-    const std::vector<ZoomSDKSharingSourceInfo> &currentShares) {
-  if (m_isRecording)
-    return SDKERR_SUCCESS;
-  m_isRecording = true;
+  if (use_raw_audio && audio_helper_ == nullptr) {
+    ASSERT_NOT_NULL(audio_delegate_);
+    audio_helper_ = GetAudioRawdataHelper();
+    ASSERT_NOT_NULL(audio_helper_);
+    ZOOM_ERR_CHECK(audio_helper_->subscribe(audio_delegate_.get()), "subscribe to raw audio");
+  }
+  // Prime existing share streams that may already be active when we join
+  if (use_raw_video && !initial_shares.empty()) {
+    UpdateShareSources(initial_shares);
+  }
 
-  {
-    std::lock_guard<std::mutex> lock(m_shareMtx);
-    m_shareSourceIds.clear();
-    // Setup audio
-    if (useRawAudio && m_audioDelegate) {
-      m_audioHelper = GetAudioRawdataHelper();
-      ASSERT_NOT_NULL(m_audioHelper);
-      ZOOM_ERR_CHECK(m_audioHelper->subscribe(m_audioDelegate),
-                     "subscribe to raw audio");
-    }
+  // This must be set before subscribing to renderers
+  is_recording_.store(true, std::memory_order_release);
 
-    // Setup video (shared screen capture)
-    if (useRawVideo) {
-      ASSERT_NOT_NULL(m_videoDelegate);
-      ZOOM_ERR_CHECK(createRenderer(&m_videoHelper, m_videoDelegate),
-                     "create renderer");
-
-      m_videoHelper->setRawDataResolution(ZoomSDKResolution_720P);
-      // Subscribe to any currently active shares
-      for (const auto &shareInfo : currentShares) {
-        if (shareInfo.contentType == SHARE_TYPE_DATA) {
-
-          if (subscribeShare(shareInfo) == SDKERR_SUCCESS) {
-            break;
-          }
-        }
+  // Create renderers, start pipelines, and subscribe for any prepared streams
+  if (use_raw_video) {
+    IterateStream([this](const StreamKey& key, StreamState& state) {
+      // Create renderer if not already created
+      if (!state.renderer) {
+        CreateRendererForStream(state, key);
       }
-    }
+
+      // Start pipeline if not already started
+      if (!state.pipeline) {
+        CreatePipelineForStream(state, key);
+      }
+
+      // Subscribe renderer if not already subscribed
+      SubscribeRendererForStream(state, key);
+    });
   }
 
-  // Start video pipeline if HLS is configured
-  startVideoPipeline();
-
-  Logger::getInstance().success("Raw recording started");
+  if (!was_recording) {
+    Logger::GetInstance().Success("Raw recording started");
+  } else {
+    Logger::GetInstance().Info("Raw recording refreshed");
+  }
   return SDKERR_SUCCESS;
 }
 
-SDKError MediaController::stopMedia() {
-  if (!m_isRecording)
+SDKError MediaController::StopMedia() {
+  if (!is_recording_.load(std::memory_order_acquire)) {
     return SDKERR_SUCCESS;
-  m_isRecording = false;
+  }
+  is_recording_.store(false, std::memory_order_release);
 
-  stopVideoPipeline();
+  // Clean up audio resources
+  if (audio_helper_) {
+    audio_helper_->unSubscribe();
+    audio_helper_ = nullptr;
+  }
+  audio_delegate_.reset();
 
+  // Stop all stream pipelines
+  std::unordered_map<StreamKey, StreamState> streams;
   {
-    std::lock_guard<std::mutex> lock(m_shareMtx);
-    m_shareSourceIds.clear();
-
-    if (m_audioHelper) {
-      m_audioHelper->unSubscribe();
-      m_audioHelper = nullptr;
-    }
-
-    if (m_videoHelper) {
-      m_videoHelper->unSubscribe();
-      destroyRenderer(m_videoHelper);
-      m_videoHelper = nullptr;
-    }
+    std::lock_guard<std::mutex> lock(media_mtx_);
+    streams = std::move(streams_);
+    streams_.clear();
   }
 
-  Logger::getInstance().success("Raw recording stopped");
+  // Clean up all streams
+  for (auto& [key, state] : streams) {
+    DestroyStream(key);
+  }
+
+  Logger::GetInstance().Success("Raw recording stopped");
+  timeline_clock_.Reset();
   return SDKERR_SUCCESS;
 }
 
-void MediaController::onShareStart(const ZoomSDKSharingSourceInfo &shareInfo) {
-  if (shareInfo.contentType == SHARE_TYPE_DATA) {
-    std::lock_guard<std::mutex> lock(m_shareMtx);
-    subscribeShare(shareInfo);
+void MediaController::UpdateShareSources(const std::vector<ZoomSDKSharingSourceInfo>& sources) {
+  // Build set of new share source IDs
+  std::vector<unsigned int> new_source_ids;
+  new_source_ids.reserve(sources.size());
+  for (const auto& share_info : sources) {
+    // Accept all active share sources regardless of content type
+    if (share_info.shareSourceID != 0) {
+      new_source_ids.push_back(share_info.shareSourceID);
+    }
+  }
+
+  // Find existing share stream IDs
+  std::vector<unsigned int> existing_ids;
+  IterateStream([&existing_ids](const StreamKey& key, StreamState&) {
+    if (key.kind == StreamKind::kShare) {
+      existing_ids.push_back(key.id);
+    }
+  });
+
+  // Find shares to add (in new but not in existing)
+  std::vector<unsigned int> to_add;
+  for (unsigned int new_id : new_source_ids) {
+    if (std::find(existing_ids.begin(), existing_ids.end(), new_id) == existing_ids.end()) {
+      to_add.push_back(new_id);
+    }
+  }
+
+  // Find shares to remove (in existing but not in new)
+  std::vector<unsigned int> to_remove;
+  for (unsigned int existing_id : existing_ids) {
+    if (std::find(new_source_ids.begin(), new_source_ids.end(), existing_id) ==
+        new_source_ids.end()) {
+      to_remove.push_back(existing_id);
+    }
+  }
+
+  // Create new share streams
+  for (unsigned int share_id : to_add) {
+    EnsureStream({StreamKind::kShare, share_id});
+  }
+
+  // Destroy removed share streams
+  for (unsigned int share_id : to_remove) {
+    DestroyStream({StreamKind::kShare, share_id});
   }
 }
 
-void MediaController::onShareEnd(const ZoomSDKSharingSourceInfo &shareInfo) {
-  if (shareInfo.contentType == SHARE_TYPE_DATA) {
-    std::lock_guard<std::mutex> lock(m_shareMtx);
-    unSubscribeShare(shareInfo);
+void MediaController::PushVideoI420ForSource(StreamKind kind, unsigned int id, const char* y,
+                                             const char* u, const char* v, unsigned int width,
+                                             unsigned int height, uint64_t timestamp_ms) {
+  // Set timeline base from first media frame
+  timeline_clock_.SetBaseFromPts(timestamp_ms);
+
+  std::lock_guard<std::mutex> lock(media_mtx_);
+  StreamKey key{kind, id};
+  auto it = streams_.find(key);
+  if (it != streams_.end() && it->second.pipeline) {
+    it->second.pipeline->PushVideoI420(y, u, v, width, height, timestamp_ms);
   }
 }
 
-void MediaController::startVideoPipeline() {
+void MediaController::PushAudioPCM(StreamKind kind, const uint8_t* pcm_data, size_t pcm_length,
+                                   uint32_t sample_rate, uint32_t channels, uint64_t timestamp_ms) {
+  // Set timeline base from first media frame
+  timeline_clock_.SetBaseFromPts(timestamp_ms);
+
+  // Push audio only to pipelines of the specified stream kind
+  IteratePipeline([kind, pcm_data, pcm_length, sample_rate, channels, timestamp_ms](
+                      const StreamKey& key, MediaEncodePipeline& pipeline) {
+    if (key.kind == kind) {
+      pipeline.PushAudioPcm(pcm_data, pcm_length, sample_rate, channels, timestamp_ms);
+    }
+  });
+}
+
+void MediaController::DispatchAudio(const uint8_t* pcm_data, size_t pcm_length,
+                                    uint32_t sample_rate, uint32_t channels, int audio_type,
+                                    uint32_t user_id, uint64_t timestamp_ms) {
+  auto audio_callback = config_.GetAudioCallback();
+  if (audio_callback && pcm_data && pcm_length > 0) {
+    audio_callback(pcm_data, pcm_length, sample_rate, channels, audio_type, user_id, timestamp_ms);
+  }
+}
+
+void MediaController::RequestVideoEncoderIdr() {
+  IteratePipeline([](const StreamKey&, MediaEncodePipeline& pipeline) { pipeline.RequestIdr(); });
+}
+
+void MediaController::EnsureStream(const StreamKey& key) {
+  std::lock_guard<std::mutex> lock(media_mtx_);
+
+  if (streams_.count(key)) return;  // already exists
+
+  StreamState state;
+  streams_[key] = std::move(state);
+
+  const std::string suffix = config_.GetStreamSuffix(key);
+  Logger::GetInstance().Success("Prepared stream " + suffix);
+
+  // If recording is already active, immediately create renderer, start pipeline, and subscribe
+  if (is_recording_.load(std::memory_order_acquire)) {
+    auto it = streams_.find(key);
+    if (it == streams_.end()) {
+      return;
+    }
+
+    // Create renderer if not already created
+    if (!it->second.renderer) {
+      CreateRendererForStream(it->second, key);
+    }
+
+    // Start pipeline if not already started
+    if (!it->second.pipeline) {
+      CreatePipelineForStream(it->second, key);
+    }
+
+    // Subscribe renderer if not already subscribed
+    SubscribeRendererForStream(it->second, key);
+  }
+}
+
+void MediaController::DestroyStream(const StreamKey& key) {
+  const std::string suffix = config_.GetStreamSuffix(key);
+
   std::shared_ptr<MediaEncodePipeline> pipeline;
-  VideoEncoderConfig videoEnc;
-  AudioEncoderConfig audioEnc;
-  HlsMuxerConfig mux;
-  HlsFileCallback cb;
+  std::unique_ptr<IZoomSDKRenderer> renderer;
+  std::unique_ptr<IZoomSDKRendererDelegate> delegate;
 
   {
-    std::lock_guard<std::mutex> lock(m_mediaMtx);
-    if (m_mediaPipeline)
+    std::lock_guard<std::mutex> lock(media_mtx_);
+    auto it = streams_.find(key);
+    if (it == streams_.end()) {
       return;
-    if (!m_videoEncoderCfg || !m_audioEncoderCfg || !m_muxerCfg ||
-        !m_hlsFileCallback)
-      return;
+    }
 
-    videoEnc = *m_videoEncoderCfg;
-    audioEnc = *m_audioEncoderCfg;
-    mux = *m_muxerCfg;
-    cb = m_hlsFileCallback;
-    pipeline = std::make_shared<MediaEncodePipeline>();
-    m_mediaPipeline = pipeline;
+    pipeline = std::move(it->second.pipeline);
+    renderer = std::move(it->second.renderer);
+    delegate = std::move(it->second.delegate);
+    streams_.erase(it);
   }
 
-  if (pipeline->start(videoEnc, audioEnc, mux, cb)) {
-    Logger::getInstance().success("Media pipeline started");
+  // Stop pipeline outside lock
+  if (pipeline) {
+    pipeline->Stop();
+  }
+
+  // Clean up renderer and delegate
+  if (renderer) {
+    // Note: Skip unSubscribe() to avoid potential segfaults
+    destroyRenderer(renderer.get());
+    renderer.release();
+  }
+  // delegate will be automatically deleted when unique_ptr goes out of scope
+
+  Logger::GetInstance().Success("Destroyed stream " + suffix);
+}
+
+void MediaController::CreateRendererForStream(StreamState& state, const StreamKey& key) {
+  const std::string suffix = config_.GetStreamSuffix(key);
+
+  if (!video_delegate_factory_) {
+    Logger::GetInstance().Warn("No video delegate factory set for " + suffix);
     return;
   }
 
-  Logger::getInstance().error("Failed to start media pipeline");
-  std::lock_guard<std::mutex> lock(m_mediaMtx);
-  if (m_mediaPipeline == pipeline) {
-    m_mediaPipeline.reset();
+  auto raw_data_type =
+      (key.kind == StreamKind::kCamera) ? RAW_DATA_TYPE_VIDEO : RAW_DATA_TYPE_SHARE;
+  auto* stream_delegate = video_delegate_factory_(raw_data_type);
+  if (!stream_delegate) {
+    Logger::GetInstance().Error("Factory returned null delegate for " + suffix);
+    return;
+  }
+
+  IZoomSDKRenderer* renderer = nullptr;
+  SDKError err = createRenderer(&renderer, stream_delegate);
+  if (err != SDKERR_SUCCESS || !renderer) {
+    Logger::GetInstance().Error("Failed to create renderer for " + suffix +
+                                " (error: " + std::to_string(err) + ")");
+    delete stream_delegate;
+    return;
+  }
+
+  renderer->setRawDataResolution(ZoomSDKResolution_720P);
+
+  // Subscribe immediately if recording is already active, otherwise defer until
+  // startMedia()
+  if (is_recording_.load(std::memory_order_acquire)) {
+    if (renderer->subscribe(key.id, raw_data_type) == SDKERR_SUCCESS) {
+      state.renderer.reset(renderer);
+      state.delegate.reset(stream_delegate);
+      Logger::GetInstance().Success("Subscribed to " + suffix);
+    } else {
+      Logger::GetInstance().Error("Failed to subscribe to " + suffix);
+      destroyRenderer(renderer);
+      delete stream_delegate;
+    }
+  } else {
+    // Defer subscription until startMedia()
+    state.renderer.reset(renderer);
+    state.delegate.reset(stream_delegate);
+    Logger::GetInstance().Info("Created renderer for " + suffix + " (subscription deferred)");
   }
 }
 
-void MediaController::stopVideoPipeline() {
-  std::shared_ptr<MediaEncodePipeline> pipeline;
-  {
-    std::lock_guard<std::mutex> lock(m_mediaMtx);
-    pipeline = m_mediaPipeline;
-    m_mediaPipeline.reset();
-  }
-  if (pipeline) {
-    pipeline->stop();
-    Logger::getInstance().success("Media pipeline stopped");
-  }
-}
+void MediaController::CreatePipelineForStream(StreamState& state, const StreamKey& key) {
+  const std::string suffix = config_.GetStreamSuffix(key);
 
-void MediaController::pushVideoI420(const char *y, const char *u, const char *v,
-                                    unsigned int width, unsigned int height,
-                                    unsigned long long timestampMs) {
-  if (auto pipeline = getMediaPipelineShared()) {
-    pipeline->pushVideoI420(y, u, v, width, height, timestampMs);
-  }
-}
+  auto video_encoder_cfg = config_.GetVideoEncoderConfigForStream(key);
+  auto audio_encoder_cfg = config_.GetAudioEncoderConfig();
+  auto muxer_cfg = config_.GetMuxerConfigForStream(key);
+  auto hls_file_callback = config_.GetHlsFileCallback();
 
-void MediaController::pushAudioPCM(const uint8_t *pcmData, size_t pcmLength,
-                                   uint32_t sampleRate, uint32_t channels,
-                                   uint64_t timestampMs) {
-  if (auto pipeline = getMediaPipelineShared()) {
-    pipeline->pushAudioPCM(pcmData, pcmLength, sampleRate, channels,
-                           timestampMs);
+  if (!video_encoder_cfg || !audio_encoder_cfg || !muxer_cfg || !hls_file_callback) {
+    Logger::GetInstance().Warn("Configs not set; cannot start pipeline for " + suffix);
+    return;
+  }
+
+  auto pipeline = std::make_shared<MediaEncodePipeline>();
+  if (pipeline->Start(*video_encoder_cfg, *audio_encoder_cfg, *muxer_cfg, hls_file_callback)) {
+    state.pipeline = pipeline;
+    Logger::GetInstance().Success("Started pipeline for " + suffix);
+  } else {
+    Logger::GetInstance().Error("Failed to start pipeline for " + suffix);
   }
 }
 
-void MediaController::dispatchAudio(const uint8_t *pcmData, size_t pcmLength,
-                                    uint32_t sampleRate, uint32_t channels,
-                                    int audioType, uint32_t userId,
-                                    uint64_t timestampMs) {
-  if (m_audioCallback && pcmData && pcmLength > 0) {
-    m_audioCallback(pcmData, pcmLength, sampleRate, channels, audioType, userId,
-                    timestampMs);
+void MediaController::SubscribeRendererForStream(StreamState& state, const StreamKey& key) {
+  const std::string suffix = config_.GetStreamSuffix(key);
+
+  if (!state.renderer || !state.delegate) {
+    return;
+  }
+
+  if (state.renderer->getSubscribeId() != 0) {
+    return;  // Already subscribed
+  }
+
+  auto raw_type = (key.kind == StreamKind::kCamera) ? RAW_DATA_TYPE_VIDEO : RAW_DATA_TYPE_SHARE;
+  std::string type_str = (raw_type == RAW_DATA_TYPE_VIDEO) ? "VIDEO" : "SHARE";
+  Logger::GetInstance().Info("Subscribing " + suffix + " with ID=" + std::to_string(key.id) +
+                             " type=" + type_str);
+
+  SDKError sub_err = state.renderer->subscribe(key.id, raw_type);
+  if (sub_err == SDKERR_SUCCESS) {
+    Logger::GetInstance().Success("Subscribed to " + suffix + " (subscribeId=" +
+                                  std::to_string(state.renderer->getSubscribeId()) + ")");
+  } else {
+    Logger::GetInstance().Error("Failed to subscribe to " + suffix +
+                                " (error=" + std::to_string(sub_err) + ")");
   }
 }
 
-void MediaController::requestVideoEncoderIDR() {
-  if (auto pipeline = getMediaPipelineShared()) {
-    pipeline->requestIDR();
+void MediaController::IteratePipeline(
+    const std::function<void(const StreamKey&, MediaEncodePipeline&)>& fn) {
+  IterateStream([&fn](const StreamKey& key, StreamState& state) {
+    if (state.pipeline) {
+      fn(key, *state.pipeline);
+    }
+  });
+}
+
+void MediaController::UpdateCameraStatus(unsigned int user_id, bool video_on) {
+  if (video_on) {
+    EnsureStream({StreamKind::kCamera, user_id});
+  } else {
+    DestroyStream({StreamKind::kCamera, user_id});
   }
 }
 
-std::shared_ptr<MediaEncodePipeline>
-MediaController::getMediaPipelineShared() const {
-  std::lock_guard<std::mutex> lock(m_mediaMtx);
-  return m_mediaPipeline;
+void MediaController::SetupRecording(IMeetingRecordingController* ctrl, bool use_raw_audio,
+                                     bool use_raw_video) {
+  if (!ctrl) {
+    Logger::GetInstance().Error("Recording controller is null");
+    return;
+  }
+
+  recording_controller_ = ctrl;
+  use_raw_audio_ = use_raw_audio;
+  use_raw_video_ = use_raw_video;
+
+  // Create recording event with callback to handle privilege changes
+  std::function<void(bool)> on_recording_privilege_changed = [this](bool can_rec) {
+    OnRecordingPrivilegeChanged(can_rec);
+  };
+
+  recording_event_ = std::make_unique<MeetingRecordingCtrlEvent>(on_recording_privilege_changed);
+  recording_controller_->SetEvent(recording_event_.get());
+
+  // Check if we can start recording immediately
+  auto err = recording_controller_->CanStartRawRecording();
+  if (err == SDKERR_SUCCESS) {
+    OnRecordingPrivilegeChanged(true);
+  } else {
+    recording_controller_->RequestLocalRecordingPrivilege();
+  }
 }
 
-static SDKError subscribeTo(IZoomSDKRenderer *videoHelper,
-                            std::vector<unsigned int> &shareSourceIds) {
-  if (!videoHelper) {
-    // Renderer not ready; sharing state will be picked up when recording starts
-    return SDKERR_SUCCESS;
+void MediaController::CleanupRecording() {
+  if (recording_controller_ && recording_event_) {
+    recording_controller_->SetEvent(nullptr);
+  }
+  recording_event_.reset();
+  recording_controller_ = nullptr;
+}
+
+void MediaController::OnRecordingPrivilegeChanged(bool can_record) {
+  if (can_record) {
+    auto err = StartRawRecording();
+    if (err == SDKERR_SUCCESS) {
+      StartMedia(use_raw_audio_, use_raw_video_, {});
+    }
+  } else {
+    StopMedia();
+    StopRawRecording();
+  }
+}
+
+SDKError MediaController::StartRawRecording() {
+  if (!recording_controller_) {
+    Logger::GetInstance().Error("Recording controller not set");
+    return SDKERR_INVALID_PARAMETER;
   }
 
-  videoHelper->unSubscribe();
-
-  if (shareSourceIds.empty()) {
-    return SDKERR_SUCCESS;
+  // Always refresh media pipelines/subscriptions
+  if (!is_recording_.load(std::memory_order_acquire)) {
+    ZOOM_ERR_CHECK(recording_controller_->StartRawRecording(), "start raw recording");
   }
 
-  auto sourceId = shareSourceIds.back();
-  ZOOM_ERR_CHECK(videoHelper->subscribe(sourceId, RAW_DATA_TYPE_SHARE),
-                 "Subscribe to share source " + std::to_string(sourceId));
-
-  Logger::getInstance().success("Subscribed to share source " +
-                                std::to_string(sourceId));
   return SDKERR_SUCCESS;
 }
 
-SDKError
-MediaController::subscribeShare(const ZoomSDKSharingSourceInfo &shareInfo) {
-  const unsigned int sourceId = shareInfo.shareSourceID;
-  const bool subscribed =
-      !m_shareSourceIds.empty() && (sourceId == m_shareSourceIds.back());
-  if (subscribed) {
+SDKError MediaController::StopRawRecording() {
+  if (!recording_controller_) {
     return SDKERR_SUCCESS;
   }
 
-  auto it =
-      std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
-  if (it != m_shareSourceIds.end()) {
-    m_shareSourceIds.erase(it);
-  }
-  m_shareSourceIds.push_back(sourceId);
-  return subscribeTo(m_videoHelper, m_shareSourceIds);
-}
-
-SDKError
-MediaController::unSubscribeShare(const ZoomSDKSharingSourceInfo &shareInfo) {
-  const unsigned int sourceId = shareInfo.shareSourceID;
-  const bool subscribed =
-      !m_shareSourceIds.empty() && (sourceId == m_shareSourceIds.back());
-
-  auto it =
-      std::find(m_shareSourceIds.begin(), m_shareSourceIds.end(), sourceId);
-  if (it == m_shareSourceIds.end()) {
-    return SDKERR_UNKNOWN;
-  }
-  m_shareSourceIds.erase(it);
-
-  if (!subscribed) {
+  if (!is_recording_.load(std::memory_order_acquire)) {
     return SDKERR_SUCCESS;
   }
-  return subscribeTo(m_videoHelper, m_shareSourceIds);
+
+  return recording_controller_->StopRawRecording();
 }

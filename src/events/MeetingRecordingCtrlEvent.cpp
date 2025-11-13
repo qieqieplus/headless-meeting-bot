@@ -1,42 +1,39 @@
 #include "MeetingRecordingCtrlEvent.h"
 
-MeetingRecordingCtrlEvent::MeetingRecordingCtrlEvent(
-    std::function<void(bool)> onPrivilegeChanged)
-    : m_onRecordingPrivilegeChanged(onPrivilegeChanged) {}
+MeetingRecordingCtrlEvent::MeetingRecordingCtrlEvent(std::function<void(bool)> on_privilege_changed)
+    : on_recording_privilege_changed_(on_privilege_changed) {}
 
-MeetingRecordingCtrlEvent::~MeetingRecordingCtrlEvent() {}
+MeetingRecordingCtrlEvent::~MeetingRecordingCtrlEvent() = default;
 
-void MeetingRecordingCtrlEvent::onRecordPrivilegeChanged(bool bCanRec) {
-  if (m_onRecordingPrivilegeChanged)
-    m_onRecordingPrivilegeChanged(bCanRec);
+void MeetingRecordingCtrlEvent::onRecordPrivilegeChanged(bool b_can_rec) {
+  if (on_recording_privilege_changed_) {
+    on_recording_privilege_changed_(b_can_rec);
+  }
 }
 
-void MeetingRecordingCtrlEvent::onRecordingStatus(
-    ZOOMSDK::RecordingStatus status) {}
+void MeetingRecordingCtrlEvent::onRecordingStatus(ZOOMSDK::RecordingStatus status) {}
 
-void MeetingRecordingCtrlEvent::onCloudRecordingStatus(
-    ZOOMSDK::RecordingStatus status) {}
+void MeetingRecordingCtrlEvent::onCloudRecordingStatus(ZOOMSDK::RecordingStatus status) {}
 
 void MeetingRecordingCtrlEvent::onLocalRecordingPrivilegeRequestStatus(
     ZOOMSDK::RequestLocalRecordingStatus status) {}
 
 void MeetingRecordingCtrlEvent::onLocalRecordingPrivilegeRequested(
-    ZOOMSDK::IRequestLocalRecordingPrivilegeHandler *handler) {}
+    ZOOMSDK::IRequestLocalRecordingPrivilegeHandler* handler) {}
 
 void MeetingRecordingCtrlEvent::onRequestCloudRecordingResponse(
     ZOOMSDK::RequestStartCloudRecordingStatus status) {}
 
 void MeetingRecordingCtrlEvent::onStartCloudRecordingRequested(
-    ZOOMSDK::IRequestStartCloudRecordingHandler *handler) {}
+    ZOOMSDK::IRequestStartCloudRecordingHandler* handler) {}
 
-void MeetingRecordingCtrlEvent::onCloudRecordingStorageFull(
-    time_t gracePeriodDate) {}
+void MeetingRecordingCtrlEvent::onCloudRecordingStorageFull(time_t grace_period_date) {}
 
 void MeetingRecordingCtrlEvent::onEnableAndStartSmartRecordingRequested(
-    ZOOMSDK::IRequestEnableAndStartSmartRecordingHandler *handler) {}
+    ZOOMSDK::IRequestEnableAndStartSmartRecordingHandler* handler) {}
 
 void MeetingRecordingCtrlEvent::onSmartRecordingEnableActionCallback(
-    ZOOMSDK::ISmartRecordingEnableActionHandler *handler) {}
+    ZOOMSDK::ISmartRecordingEnableActionHandler* handler) {}
 
-void MeetingRecordingCtrlEvent::onTranscodingStatusChanged(
-    ZOOMSDK::TranscodingStatus status, const zchar_t *path) {}
+void MeetingRecordingCtrlEvent::onTranscodingStatusChanged(ZOOMSDK::TranscodingStatus status,
+                                                           const zchar_t* path) {}

@@ -1,6 +1,7 @@
 # Build folder
 src/build/*
 !src/build/.gitkeep
+src/scripts/*
 
 # MacOS
 .DS_Store
@@ -27,6 +28,7 @@ src/build/*
 ### IDE
 .idea/
 .vscode/
+.cursorrules
 
 ### CMake template
 CMakeCache.txt

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <queue>
 #include <string>
 
 extern "C" {
@@ -13,66 +14,65 @@ extern "C" {
 /* #include <libswscale/swscale.h> */
 }
 
-struct VideoEncoderConfig {
-  int width = 0;  // auto-detect
-  int height = 0; // auto-detect
-  int fps = 30;
-  int bitrateKbps = 2500;
-  int gopSeconds = 3;           // Keyframe interval in seconds
-  std::string encoder = "auto"; // "x264", "nvenc", "auto"
-  std::string preset =
-      "veryfast"; // x264: ultrafast..veryslow; nvenc: fast,medium,slow
-  std::string profile = "main"; // "baseline", "main", "high"
-};
+#include "MediaConfig.h"
 
 // FFmpeg-based H.264 encoder with libx264 and h264_nvenc support
 class VideoEncoder {
-public:
+ public:
   VideoEncoder();
   ~VideoEncoder();
 
   // Initialize encoder with given config
-  bool initialize(const VideoEncoderConfig &config);
+  bool Initialize(const VideoEncoderConfig& config);
 
   // Reinitialize with new config (closes and reopens encoder)
-  bool reinitialize(const VideoEncoderConfig &config);
+  bool Reinitialize(const VideoEncoderConfig& config);
 
   // Shutdown encoder
-  void shutdown();
+  void Shutdown();
 
-  // Encode one I420 frame and return encoded packet
-  // Returns AVPacket* on success (caller must call av_packet_unref), nullptr on
-  // failure Input planes must be contiguous with standard strides: Y=width,
-  // U=V=width/2
-  AVPacket *encodeI420(const uint8_t *yPlane, const uint8_t *uPlane,
-                       const uint8_t *vPlane, int width, int height,
-                       int64_t ptsUs);
+  // Encode one I420 frame. Returns true on success, false on error.
+  // Note: Encoding a single frame may produce 0, 1, or multiple packets due to
+  // encoder buffering. Use getNextPacket() to retrieve ready packets.
+  // Input planes must be contiguous with standard strides: Y=width, U=V=width/2
+  bool EncodeI420(const uint8_t* y_plane, const uint8_t* u_plane, const uint8_t* v_plane, int width,
+                  int height, int64_t pts_us);
+
+  // Get next available encoded packet from the internal queue.
+  // Returns AVPacket* on success (caller must call av_packet_free), nullptr if
+  // no packets are ready. Call this in a loop after encodeI420() until it
+  // returns nullptr.
+  AVPacket* GetNextPacket();
+
+  // Flush the encoder to retrieve all remaining buffered packets.
+  // Call getNextPacket() after this to retrieve flushed packets.
+  void Flush();
 
   // Request next frame to be a keyframe (IDR)
-  void requestIDR();
+  void RequestIdr();
 
-  int getWidth() const { return currentConfig.width; }
-  int getHeight() const { return currentConfig.height; }
-  int getFps() const { return currentConfig.fps; }
-  AVCodecContext *getCodecContext() { return codecCtx; }
-  int64_t getFrameDuration() const { return frameDuration; }
+  int GetWidth() const { return videoConfig_.width; }
+  int GetHeight() const { return videoConfig_.height; }
+  int GetFps() const { return videoConfig_.fps; }
+  AVCodecContext* GetCodecContext() { return codecCtx_; }
+  int64_t GetFrameDuration() const { return frameDuration_; }
 
-private:
-  bool openEncoder();
-  void closeEncoder();
-  const AVCodec *selectCodec(const std::string &encoderName);
-  bool configureEncoder(AVCodecContext *ctx, const AVCodec *codec);
-  AVFrame *convertToAVFrame(const uint8_t *yPlane, const uint8_t *uPlane,
-                            const uint8_t *vPlane, int width, int height,
-                            int64_t ptsUs);
+ private:
+  bool OpenEncoder();
+  void CloseEncoder();
+  const AVCodec* SelectCodec(const std::string& encoder_name);
+  bool ConfigureEncoder(AVCodecContext* ctx, const AVCodec* codec);
+  AVFrame* ConvertToAvFrame(const uint8_t* y_plane, const uint8_t* u_plane, const uint8_t* v_plane,
+                            int width, int height, int64_t pts_us);
+  void DrainPackets();
 
-private:
-  VideoEncoderConfig currentConfig;
-  AVCodecContext *codecCtx = nullptr;
-  AVFrame *frame = nullptr;
-  AVPacket *pkt = nullptr;
+ private:
+  VideoEncoderConfig videoConfig_;
+  AVCodecContext* codecCtx_ = nullptr;
+  AVFrame* frame_ = nullptr;
   // SwsContext* swsCtx = nullptr;
-  int64_t frameCount = 0;
-  std::atomic<bool> forceKeyframe{false};
-  int64_t frameDuration = 0;
+  int64_t frameCount_ = 0;
+  std::atomic<bool> forceKeyframe_{false};
+  int64_t frameDuration_ = 0;
+  std::queue<AVPacket*> packetQueue_;
 };
