@@ -108,7 +108,9 @@ class AudioRecorder:
         join_url = f"http://{self.host}:{self.port}/api/meetings"
         payload = {
             "meeting_id": self.meeting_id,
-            "display_name": self.display_name
+            "display_name": self.display_name,
+            "enable_audio": True,  # ensure raw audio is requested so bot asks for privilege
+            "enable_video": True,  # enable HLS video for shares
         }
 
         if self.password:
@@ -235,7 +237,7 @@ def main():
     parser.add_argument("meeting_id", help="Meeting ID to record")
     parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8080, help="Server port (default: 8080)")
-    parser.add_argument("--output-dir", default="recordings", help="Output directory for WAV files")
+    parser.add_argument("--output-dir", default="audio_recordings", help="Output directory for WAV files")
     parser.add_argument("--password", help="Meeting password (optional)")
     parser.add_argument("--display-name", default="AudioRecorder", help="Display name for joining meeting")
 

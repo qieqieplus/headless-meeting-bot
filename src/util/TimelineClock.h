@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_TIMELINE_CLOCK_H
-#define HEADLESS_ZOOM_BOT_TIMELINE_CLOCK_H
+#pragma once
 
 #include <chrono>
 #include <cstdint>
@@ -52,5 +51,3 @@ class TimelineClock {
   uint64_t wall_clock_base_;
   mutable std::mutex mutex_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_TIMELINE_CLOCK_H

@@ -102,7 +102,6 @@ func (pm *ProcessManager) processGOBStream(
 	}
 }
 
-// mapEventStatusToMeetingStatus converts event status string to MeetingStatus
 func (pm *ProcessManager) mapEventStatusToMeetingStatus(status string) zoombot.MeetingStatus {
 	switch status {
 	case "idle":
@@ -122,12 +121,10 @@ func (pm *ProcessManager) mapEventStatusToMeetingStatus(status string) zoombot.M
 	}
 }
 
-// streamAudioFromWorker streams audio frames from a worker process to the audio bus
 func (pm *ProcessManager) streamAudioFromWorker(worker *WorkerProcess) {
 	pm.streamFromWorker(worker, "/audio", pm.processAudioStream)
 }
 
-// processAudioStream processes the GOB stream from the worker
 func (pm *ProcessManager) processAudioStream(worker *WorkerProcess, resp *http.Response) {
 	pm.processGOBStream(worker, resp, "audio", func(dec *gob.Decoder) error {
 		var frame stream.AudioEvent
@@ -141,12 +138,10 @@ func (pm *ProcessManager) processAudioStream(worker *WorkerProcess, resp *http.R
 	})
 }
 
-// streamEventsFromWorker streams events from a worker process to the events bus
 func (pm *ProcessManager) streamEventsFromWorker(worker *WorkerProcess) {
 	pm.streamFromWorker(worker, "/events", pm.processEventsStream)
 }
 
-// processEventsStream processes the GOB stream from the worker
 func (pm *ProcessManager) processEventsStream(worker *WorkerProcess, resp *http.Response) {
 	pm.processGOBStream(worker, resp, "events", func(dec *gob.Decoder) error {
 		var event stream.Event
@@ -166,12 +161,10 @@ func (pm *ProcessManager) processEventsStream(worker *WorkerProcess, resp *http.
 	})
 }
 
-// streamVideoFromWorker streams video files from a worker process to the video bus
 func (pm *ProcessManager) streamVideoFromWorker(worker *WorkerProcess) {
 	pm.streamFromWorker(worker, "/video", pm.processVideoStream)
 }
 
-// processVideoStream processes the GOB stream from the worker
 func (pm *ProcessManager) processVideoStream(worker *WorkerProcess, resp *http.Response) {
 	pm.processGOBStream(worker, resp, "video", func(dec *gob.Decoder) error {
 		var fileEvent stream.FileEvent

@@ -4,7 +4,7 @@
 #include <iomanip>
 #include <sstream>
 
-#include "video/MediaConfig.h"
+#include "video/EncoderConfig.h"
 
 MediaConfig::MediaConfig(std::string meeting_id) : meeting_id_(std::move(meeting_id)) {}
 

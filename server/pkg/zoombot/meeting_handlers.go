@@ -16,7 +16,6 @@ func (m *MeetingInstance) HandleStatusChange(status MeetingStatus, detail int) {
 	m.statusDetail = detail
 	m.statusMu.Unlock()
 
-	// Publish status event to events bus
 	if m.eventsBus != nil {
 		event := stream.NewMeetingStatusEvent(m.meetingID, status.String(), detail)
 		m.eventsBus.Publish(m.meetingID, event)
@@ -31,7 +30,6 @@ func (m *MeetingInstance) HandleStatusChange(status MeetingStatus, detail int) {
 			_ = m.Stop()
 		}()
 	case StatusEnded:
-		// Meeting ended naturally, trigger cleanup
 		go func() {
 			log.Infof("Meeting %s ended, initiating cleanup", m.meetingID)
 			_ = m.Stop()
@@ -71,6 +69,10 @@ func (m *MeetingInstance) HandleUserStatusEvent(event *UserStatusEvent) {
 		eventType = stream.UserEventShareStarted
 	case UserEventShareStopped:
 		eventType = stream.UserEventShareStopped
+	case UserEventActiveSpeaking:
+		eventType = stream.UserEventActiveSpeaking
+	case UserEventInactiveSpeaking:
+		eventType = stream.UserEventInactiveSpeaking
 	default:
 		return
 	}
@@ -83,7 +85,6 @@ func (m *MeetingInstance) HandleUserStatusEvent(event *UserStatusEvent) {
 		Share: event.Share,
 	}
 
-	// Update internal user cache
 	m.usersMu.Lock()
 	switch event.EventType {
 	case UserEventLeft:
@@ -94,7 +95,6 @@ func (m *MeetingInstance) HandleUserStatusEvent(event *UserStatusEvent) {
 	}
 	m.usersMu.Unlock()
 
-	// Publish to events bus
 	if m.eventsBus != nil {
 		evt := stream.NewUserEvent(m.meetingID, eventType, userInfo, int64(event.Timestamp))
 		m.eventsBus.Publish(m.meetingID, evt)
@@ -106,7 +106,6 @@ func (m *MeetingInstance) OnAudio(data []byte, audioType int, nodeID uint64) {
 	// Copy C memory into pooled Go buffer
 	frame := stream.NewAudioEvent(stream.AudioType(audioType), nodeID, data)
 
-	// Update statistics
 	m.statisticsMu.Lock()
 	m.statistics.AudioFramesReceived++
 	m.statistics.AudioBytesReceived += uint64(len(frame.Data))
@@ -151,7 +150,6 @@ func (m *MeetingInstance) OnHlsFile(filename string, data []byte, isPlaylist boo
 		return
 	}
 
-	// Update video statistics
 	m.statisticsMu.Lock()
 	m.statistics.VideoFilesReceived++
 	if !isPlaylist {

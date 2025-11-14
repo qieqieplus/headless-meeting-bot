@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_CHECKS_H
-#define HEADLESS_ZOOM_BOT_CHECKS_H
+#pragma once
 
 #include <cstdlib>
 #include <sstream>
@@ -30,5 +29,3 @@
       return _z_err;                                                \
     }                                                               \
   } while (0)
-
-#endif  // HEADLESS_ZOOM_BOT_CHECKS_H

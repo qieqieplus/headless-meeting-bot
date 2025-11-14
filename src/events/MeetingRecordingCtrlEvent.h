@@ -1,6 +1,5 @@
 
-#ifndef HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H
+#pragma once
 
 #include <functional>
 
@@ -54,5 +53,3 @@ class MeetingRecordingCtrlEvent : public ZOOMSDK::IMeetingRecordingCtrlEvent {
       ZOOMSDK::ISmartRecordingEnableActionHandler* handler) override;
   void onTranscodingStatusChanged(ZOOMSDK::TranscodingStatus status, const zchar_t* path) override;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGRECORDCTRLEVENT_H

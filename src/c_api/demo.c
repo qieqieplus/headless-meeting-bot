@@ -87,6 +87,10 @@ const char* user_event_type_to_string(ZoomUserEventType type) {
       return "SHARE_STARTED";
     case ZOOM_USER_EVENT_TYPE_SHARE_STOPPED:
       return "SHARE_STOPPED";
+    case ZOOM_USER_EVENT_TYPE_ACTIVE_SPEAKING:
+      return "ACTIVE_SPEAKING";
+    case ZOOM_USER_EVENT_TYPE_INACTIVE_SPEAKING:
+      return "INACTIVE_SPEAKING";
     default:
       return "UNKNOWN";
   }

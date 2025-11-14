@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETINGVIDEOEVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGVIDEOEVENT_H
+#pragma once
 
 #include "meeting_service_components/meeting_video_interface.h"
 
@@ -30,5 +29,3 @@ class MeetingVideoEvent : public ZOOMSDK::IMeetingVideoCtrlEvent {
  private:
   IUserEventSink& sink_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGVIDEOEVENT_H

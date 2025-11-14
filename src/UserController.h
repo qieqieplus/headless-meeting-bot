@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_USERCONTROLLER_H
-#define HEADLESS_ZOOM_BOT_USERCONTROLLER_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -44,7 +43,9 @@ struct UserStatusEvent {
     kVideoOn,
     kVideoOff,
     kShareStarted,
-    kShareStopped
+    kShareStopped,
+    kActiveSpeaking,
+    kInactiveSpeaking
   };
 
   Type type;
@@ -92,11 +93,11 @@ class UserController : public IUserEventSink {
   void HandleParticipantLeft(unsigned int user_id);
   void HandleAudioStatus(unsigned int user_id, ZOOMSDK::AudioStatus status);
   void HandleVideoStatus(unsigned int user_id, ZOOMSDK::VideoStatus status);
+  void HandleSpeakingStatus(unsigned int user_id, bool is_speaking);
 
  private:
   void HandleShareStatus(unsigned int user_id, bool is_sharing);
 
-  void PopulateInitialUsers();
   void EnsureUserCached(unsigned int user_id);
 
   UserSnapshot MakeSnapshot(ZOOMSDK::IUserInfo* user_info) const;
@@ -132,5 +133,3 @@ class UserController : public IUserEventSink {
   std::function<void(unsigned int, bool)> on_share_status_changed_;
   std::function<void(const UserStatusEvent&)> on_status_event_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_USERCONTROLLER_H

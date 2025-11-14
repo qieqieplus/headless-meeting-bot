@@ -1,6 +1,10 @@
 #include "MeetingAudioEvent.h"
 
+#include <unordered_set>
+#include <vector>
+
 #include "IUserEventSink.h"
+#include "util/Logger.h"
 
 MeetingAudioEvent::MeetingAudioEvent(IUserEventSink& sink) : sink_(sink) {}
 
@@ -19,7 +23,7 @@ void MeetingAudioEvent::onUserAudioStatusChange(
   }
 }
 
-void MeetingAudioEvent::onUserActiveAudioChange(ZOOMSDK::IList<unsigned int>*) {}
+void MeetingAudioEvent::onUserActiveAudioChange(ZOOMSDK::IList<unsigned int>* plst_active_audio) {}
 
 void MeetingAudioEvent::onHostRequestStartAudio(ZOOMSDK::IRequestStartAudioHandler*) {}
 

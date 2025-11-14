@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_ZOOM_SDK_H
-#define HEADLESS_ZOOM_BOT_ZOOM_SDK_H
+#pragma once
 
 #include <jwt-cpp/jwt.h>
 
@@ -72,5 +71,3 @@ class ZoomSDK {
   ZOOMSDK::INetworkConnectionHelper* GetNetworkHelper() const noexcept { return network_helper_; }
   ZOOMSDK::IMeetingService* GetMeetingService() const noexcept { return meeting_service_; }
 };
-
-#endif  // HEADLESS_ZOOM_BOT_ZOOM_SDK_H

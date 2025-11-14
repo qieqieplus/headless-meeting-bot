@@ -69,10 +69,10 @@ void MeetingParticipantsEvent::onVirtualNameTagStatusChanged(bool, unsigned int)
 
 void MeetingParticipantsEvent::onVirtualNameTagRosterInfoUpdated(unsigned int) {}
 
+void MeetingParticipantsEvent::onGrantCoOwnerPrivilegeChanged(bool) {}
+
 #if defined(WIN32)
 void MeetingParticipantsEvent::onCreateCompanionRelation(unsigned int, unsigned int) {}
 
 void MeetingParticipantsEvent::onRemoveCompanionRelation(unsigned int) {}
 #endif
-
-void MeetingParticipantsEvent::onGrantCoOwnerPrivilegeChanged(bool) {}

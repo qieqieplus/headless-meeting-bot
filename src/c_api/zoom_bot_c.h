@@ -1,5 +1,4 @@
-#ifndef ZOOM_BOT_C_API_H
-#define ZOOM_BOT_C_API_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -58,7 +57,9 @@ typedef enum {
   ZOOM_USER_EVENT_TYPE_VIDEO_ON = 5,
   ZOOM_USER_EVENT_TYPE_VIDEO_OFF = 6,
   ZOOM_USER_EVENT_TYPE_SHARE_STARTED = 7,
-  ZOOM_USER_EVENT_TYPE_SHARE_STOPPED = 8
+  ZOOM_USER_EVENT_TYPE_SHARE_STOPPED = 8,
+  ZOOM_USER_EVENT_TYPE_ACTIVE_SPEAKING = 9,
+  ZOOM_USER_EVENT_TYPE_INACTIVE_SPEAKING = 10
 } ZoomUserEventType;
 
 typedef struct {
@@ -211,5 +212,3 @@ ZOOM_BOT_C_API void zoom_bot_stop_loop();
 #ifdef __cplusplus
 }
 #endif
-
-#endif  // ZOOM_BOT_C_API_H

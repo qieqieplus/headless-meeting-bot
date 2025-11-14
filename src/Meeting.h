@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETING_H
-#define HEADLESS_ZOOM_BOT_MEETING_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -88,5 +87,3 @@ class Meeting {
       bool is_meeting_start, const std::string& join_token, bool use_raw_audio, bool use_raw_video,
       ZOOMSDK::IMeetingService* meeting_service, ZOOMSDK::ISettingService* setting_service);
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETING_H

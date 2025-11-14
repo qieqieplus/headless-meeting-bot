@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H
-#define HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H
+#pragma once
 
 #include <functional>
 
@@ -47,5 +46,3 @@ class AuthServiceEvent : public ZOOMSDK::IAuthServiceEvent {
    */
   void onZoomAuthIdentityExpired() override;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_AUTHSERVICEEVENT_H

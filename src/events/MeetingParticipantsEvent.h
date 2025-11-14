@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETINGPARTICIPANTSEVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGPARTICIPANTSEVENT_H
+#pragma once
 
 #include "meeting_service_components/meeting_audio_interface.h"
 #include "meeting_service_components/meeting_participants_ctrl_interface.h"
@@ -34,14 +33,12 @@ class MeetingParticipantsEvent : public ZOOMSDK::IMeetingParticipantsCtrlEvent {
   void onBotAuthorizerRelationChanged(unsigned int authorize_user_id) override;
   void onVirtualNameTagStatusChanged(bool b_on, unsigned int user_id) override;
   void onVirtualNameTagRosterInfoUpdated(unsigned int user_id) override;
+  void onGrantCoOwnerPrivilegeChanged(bool can_grant_other) override;
 #if defined(WIN32)
   void onCreateCompanionRelation(unsigned int parentUserID, unsigned int childUserID) override;
   void onRemoveCompanionRelation(unsigned int childUserID) override;
 #endif
-  void onGrantCoOwnerPrivilegeChanged(bool can_grant_other) override;
 
  private:
   IUserEventSink& sink_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGPARTICIPANTSEVENT_H

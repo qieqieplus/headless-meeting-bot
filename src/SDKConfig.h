@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_SDK_CONFIG_H
-#define HEADLESS_ZOOM_BOT_SDK_CONFIG_H
+#pragma once
 
 #include <string>
 
@@ -26,5 +25,3 @@ class SDKConfig {
   // Validation
   bool IsValid() const { return !sdk_key_.empty() && !sdk_secret_.empty(); }
 };
-
-#endif  // HEADLESS_ZOOM_BOT_SDK_CONFIG_H

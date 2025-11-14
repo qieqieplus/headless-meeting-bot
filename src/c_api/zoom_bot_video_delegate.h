@@ -1,5 +1,4 @@
-#ifndef ZOOM_BOT_VIDEO_DELEGATE_H
-#define ZOOM_BOT_VIDEO_DELEGATE_H
+#pragma once
 
 #include "rawdata/rawdata_renderer_interface.h"
 #include "zoom_bot_c.h"
@@ -19,5 +18,3 @@ class ZoomBotVideoRendererDelegate : public ZOOMSDK::IZoomSDKRendererDelegate {
  private:
   MediaController* media_controller_;
 };
-
-#endif  // ZOOM_BOT_VIDEO_DELEGATE_H

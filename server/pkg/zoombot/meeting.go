@@ -15,7 +15,6 @@ type MeetingInstance struct {
 	meetingID string
 	config    *MeetingConfig
 
-	// SDK handles
 	sdkHandle     *native.SDKHandle
 	meetingHandle *native.MeetingHandle
 
@@ -25,19 +24,14 @@ type MeetingInstance struct {
 	// Audio bus for publishing frames
 	audioBus *stream.AudioBus
 
-	// Event processing
 	eventsBus *stream.EventBus
 
-	// Video processing
 	videoBus *stream.VideoBus
 
-	// Lifecycle
 	stopped bool
 
-	// Error tracking
 	lastError error
 
-	// Statistics
 	statistics   MeetingStatistics
 	statisticsMu sync.Mutex
 
@@ -45,7 +39,6 @@ type MeetingInstance struct {
 	status       MeetingStatus
 	statusDetail int
 
-	// User state
 	users   map[uint64]stream.UserInfo
 	usersMu sync.RWMutex
 }
@@ -119,11 +112,9 @@ func (m *MeetingInstance) Start() error {
 	log.Infof("Starting meeting instance for meeting ID: %s", m.meetingID)
 	m.HandleStatusChange(StatusConnecting, 0)
 
-	// Create and start OS thread
 	m.osThread = native.NewOSThread()
 	m.osThread.Start()
 
-	// Join meeting on OS thread
 	var joinError error
 	m.osThread.Execute(func() {
 		joinError = m.joinMeeting()
@@ -135,7 +126,6 @@ func (m *MeetingInstance) Start() error {
 		return joinError
 	}
 
-	// Start SDK event loop on OS thread
 	go func() {
 		m.osThread.Execute(func() {
 			native.RunLoop()
@@ -147,14 +137,12 @@ func (m *MeetingInstance) Start() error {
 
 // joinMeeting performs the actual meeting join operation
 func (m *MeetingInstance) joinMeeting() error {
-	// Create SDK instance
 	sdk, err := native.CreateSDK(m.config.SDKKey, m.config.SDKSecret)
 	if err != nil {
 		return fmt.Errorf("failed to create SDK: %w", err)
 	}
 	m.sdkHandle = sdk
 
-	// Create and join meeting
 	meeting, err := sdk.CreateAndJoinMeeting(
 		m.config.MeetingID,
 		m.config.Password,
@@ -178,14 +166,12 @@ func (m *MeetingInstance) joinMeeting() error {
 		return fmt.Errorf("failed to set status callback: %w", err)
 	}
 
-	// Set user status callback
 	if err := meeting.SetUserStatusCallback(); err != nil {
 		meeting.Destroy()
 		sdk.Destroy()
 		return fmt.Errorf("failed to set user status callback: %w", err)
 	}
 
-	// Set audio callback if enabled
 	if m.config.EnableAudio {
 		if err := meeting.SetAudioCallback(); err != nil {
 			meeting.Destroy()
@@ -194,7 +180,6 @@ func (m *MeetingInstance) joinMeeting() error {
 		}
 	}
 
-	// Set HLS video callback if enabled
 	if m.config.EnableVideo {
 		hlsConfig := &native.HlsVideoConfig{
 			Width:            0,    // auto-detect
@@ -219,9 +204,6 @@ func (m *MeetingInstance) joinMeeting() error {
 	return nil
 }
 
-// processAudioFrames processes incoming audio frames and forwards them to the bus
-// processAudioFrames removed: we publish directly from the native callback now.
-
 // Stop stops the meeting instance and leaves the meeting
 func (m *MeetingInstance) Stop() error {
 	m.statusMu.Lock()
@@ -234,19 +216,16 @@ func (m *MeetingInstance) Stop() error {
 
 	log.Infof("Stopping meeting instance for meeting ID: %s", m.meetingID)
 
-	// Clean up SDK resources on OS thread
-	// Critical: Clear callbacks BEFORE stopping event loop to prevent callbacks from firing on freed memory
 	if m.osThread != nil {
+		// Request the GLib main loop to stop.
+		native.StopLoop()
+
 		m.osThread.Execute(func() {
 			if m.meetingHandle != nil {
-				// Destroy clears all remaining callbacks (status, user, audio)
 				m.meetingHandle.Destroy()
 				m.meetingHandle = nil
 			}
 			if m.sdkHandle != nil {
-				// SDK destroy also stops the event loop
-				log.Infof("Destroying SDK handle~~")
-				time.Sleep(1 * time.Second)
 				m.sdkHandle.Destroy()
 				m.sdkHandle = nil
 			}

@@ -16,17 +16,14 @@ import (
 )
 
 func startServer() {
-	// Load configuration
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatal(err)
 	}
 
-	// Initialize logger
 	log.Init(cfg.LogLevel)
 	log.Info("Starting server...")
 
-	// Create components
 	audioBus := stream.NewAudioBus()
 	eventsBus := stream.NewEventBus()
 	videoBus := stream.NewVideoBus()
@@ -40,7 +37,6 @@ func startServer() {
 	wsServer := ws.NewWebSocketServer(audioBus, eventsBus, videoBus, processManager, cfg)
 	httpServer := server.NewHTTPServer(processManager, wsServer)
 
-	// Start HTTP server in a goroutine
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: httpServer,
@@ -53,30 +49,24 @@ func startServer() {
 		}
 	}()
 
-	// Wait for shutdown signal
 	waitForShutdown(srv, processManager)
 }
 
 func waitForShutdown(srv *http.Server, manager *ProcessManager) {
-	// Create channel to listen for OS signals
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	// Block until a signal is received
 	<-stop
 
 	log.Info("Shutting down server...")
 
-	// Create a context with a timeout for graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Shutdown meeting manager first
 	if err := manager.Shutdown(); err != nil {
 		log.Errorf("Error during meeting manager shutdown: %v", err)
 	}
 
-	// Shutdown HTTP server
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Errorf("Error during HTTP server shutdown: %v", err)
 	}

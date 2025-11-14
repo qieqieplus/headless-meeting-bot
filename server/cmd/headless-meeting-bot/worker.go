@@ -58,26 +58,23 @@ type Worker struct {
 	videoBus     *stream.VideoBus
 	server       *http.Server
 	shutdownOnce sync.Once
+	stopCh       chan struct{}
 }
 
 func startWorker(configJSON string) {
-	// Parse configuration
 	var config WorkerConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		log.Fatalf("Failed to parse config: %v", err)
 	}
 
-	// Initialize logger
 	log.Init("info")
 	log.Infof("Starting meeting worker for meeting: %s on port %d (PID: %d)", config.MeetingID, config.WorkerPort, os.Getpid())
 
-	// Create and start worker
 	worker := NewWorker(&config)
 	if err := worker.Start(); err != nil {
 		log.Fatalf("Failed to start worker: %v", err)
 	}
 
-	// Wait for shutdown signal
 	worker.WaitForShutdown()
 }
 
@@ -88,6 +85,7 @@ func NewWorker(config *WorkerConfig) *Worker {
 		audioBus:  stream.NewAudioBus(),
 		eventsBus: stream.NewEventBus(),
 		videoBus:  stream.NewVideoBus(),
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -113,7 +111,6 @@ func (w *Worker) Start() error {
 		Handler: w.setupRoutes(),
 	}
 
-	// Start HTTP server in background
 	go func() {
 		log.Infof("Worker HTTP server listening on :%d", w.config.WorkerPort)
 		if err := w.server.ListenAndServe(); err != http.ErrServerClosed {
@@ -124,13 +121,11 @@ func (w *Worker) Start() error {
 	// Give server a moment to start
 	time.Sleep(serverStartDelay)
 
-	// Start meeting
 	log.Infof("Joining meeting: %s", w.config.MeetingID)
 	if err := w.instance.Start(); err != nil {
 		return fmt.Errorf("failed to start meeting: %w", err)
 	}
 
-	// Send ready notification to callback URL
 	go w.notifyReady()
 
 	return nil
@@ -219,7 +214,6 @@ func streamGOB[T any](
 	}
 }
 
-// handleHealth returns health status
 func (w *Worker) handleHealth(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
@@ -263,7 +257,6 @@ func (w *Worker) handleState(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleShutdown triggers a graceful shutdown
 func (w *Worker) handleShutdown(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
@@ -271,7 +264,6 @@ func (w *Worker) handleShutdown(rw http.ResponseWriter, r *http.Request) {
 	go w.Shutdown()
 }
 
-// handleAudioStream streams audio frames to the client
 func (w *Worker) handleAudioStream(rw http.ResponseWriter, r *http.Request) {
 	subscriberID := fmt.Sprintf("worker-%s-%s", w.config.MeetingID, r.RemoteAddr)
 	subscriber := stream.NewAudioSubscriber(subscriberID, streamBufferSize)
@@ -301,7 +293,6 @@ func (w *Worker) handleEventsStream(rw http.ResponseWriter, r *http.Request) {
 	)
 }
 
-// handleVideoStream streams video files to the client
 func (w *Worker) handleVideoStream(rw http.ResponseWriter, r *http.Request) {
 	subscriberID := fmt.Sprintf("worker-video-%s-%s", w.config.MeetingID, r.RemoteAddr)
 	subscriber := stream.NewVideoSubscriber(subscriberID, videoStreamBufferSize)
@@ -328,7 +319,6 @@ func (w *Worker) notifyReady() {
 
 	time.Sleep(readyNotificationDelay)
 
-	// Send ready notification
 	data := map[string]interface{}{
 		"meeting_id":  w.config.MeetingID,
 		"status":      "ready",
@@ -351,17 +341,18 @@ func (w *Worker) notifyReady() {
 	}
 }
 
-// WaitForShutdown waits for a shutdown signal
 func (w *Worker) WaitForShutdown() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	<-stop
-
-	w.Shutdown()
+	select {
+	case <-stop:
+		w.Shutdown()
+	case <-w.stopCh:
+		// shutdown completed via HTTP handler
+	}
 }
 
-// Shutdown performs a graceful shutdown of the worker
 func (w *Worker) Shutdown() {
 	w.shutdownOnce.Do(func() {
 		log.Info("Shutting down worker...")
@@ -384,5 +375,6 @@ func (w *Worker) Shutdown() {
 		}
 
 		log.Info("Worker shutdown complete")
+		close(w.stopCh)
 	})
 }

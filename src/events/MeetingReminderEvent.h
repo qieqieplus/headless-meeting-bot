@@ -1,6 +1,5 @@
 
-#ifndef HEADLESS_ZOOM_BOT_MEETINGREMINDEREVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGREMINDEREVENT_H
+#pragma once
 
 #include "meeting_service_components/meeting_reminder_ctrl_interface.h"
 
@@ -16,5 +15,3 @@ class MeetingReminderEvent : public ZOOMSDK::IMeetingReminderEvent {
   void onEnableReminderNotify(ZOOMSDK::IMeetingReminderContent* content,
                               ZOOMSDK::IMeetingEnableReminderHandler* handle) override;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGREMINDEREVENT_H

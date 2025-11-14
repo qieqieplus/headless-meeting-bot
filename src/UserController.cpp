@@ -153,8 +153,23 @@ void UserController::SetOnStatusEvent(const std::function<void(const UserStatusE
 }
 
 void UserController::InitializeState() {
-  // Refresh participants and their snapshots
-  PopulateInitialUsers();
+  if (auto* self_user = participants_ctrl_->GetMySelfUser()) {
+    self_user_id_ = self_user->GetUserID();
+  }
+  if (auto* list = participants_ctrl_->GetParticipantsList()) {
+    for (int i = 0; i < list->GetCount(); ++i) {
+      const unsigned int kUserId = list->GetItem(i);
+      if (kUserId == self_user_id_) {
+        continue;
+      }
+      if (auto* user_info = participants_ctrl_->GetUserByUserID(kUserId)) {
+        auto snapshot = MakeSnapshot(user_info);
+        std::lock_guard<std::mutex> lock(mutex_);
+        users_[kUserId] = snapshot;
+        EmitStatusEvent(UserStatusEvent::Type::kSnapshot, snapshot);
+      }
+    }
+  }
 }
 
 void UserController::OnShareStart(const ZoomSDKSharingSourceInfo& info) {
@@ -199,7 +214,6 @@ void UserController::OnShareEnd(const ZoomSDKSharingSourceInfo& info) {
 }
 
 void UserController::HandleParticipantJoin(unsigned int user_id) {
-  // Skip the bot itself
   if (user_id == self_user_id_) {
     return;
   }
@@ -308,27 +322,6 @@ void UserController::HandleShareStatus(unsigned int user_id, bool is_sharing) {
   }
 }
 
-void UserController::PopulateInitialUsers() {
-  if (auto* self_user = participants_ctrl_->GetMySelfUser()) {
-    self_user_id_ = self_user->GetUserID();
-  }
-  if (auto* list = participants_ctrl_->GetParticipantsList()) {
-    for (int i = 0; i < list->GetCount(); ++i) {
-      const unsigned int kUserId = list->GetItem(i);
-      // Skip the bot itself
-      if (kUserId == self_user_id_) {
-        continue;
-      }
-      if (auto* user_info = participants_ctrl_->GetUserByUserID(kUserId)) {
-        auto snapshot = MakeSnapshot(user_info);
-        std::lock_guard<std::mutex> lock(mutex_);
-        users_[kUserId] = snapshot;
-        EmitStatusEvent(UserStatusEvent::Type::kSnapshot, snapshot);
-      }
-    }
-  }
-}
-
 void UserController::EnsureUserCached(unsigned int user_id) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -363,12 +356,24 @@ void UserController::EmitStatusEvent(UserStatusEvent::Type type, const UserSnaps
                                      std::optional<bool> share) {
   UserStatusEvent event{type, snapshot, audio, video, share, 0};
 
-  // Populate timestamp from MediaController's timeline clock if available
   if (media_controller_ && media_controller_->TimelineReady()) {
     event.timestamp_ms = media_controller_->Now();
   }
 
   if (auto callback = on_status_event_) {
     callback(event);
+  }
+}
+
+void UserController::HandleSpeakingStatus(unsigned int user_id, bool is_speaking) {
+  if (user_id == 0) {
+    return;
+  }
+
+  auto user_snapshot = GetUser(user_id);
+  if (user_snapshot) {
+    auto event_type = is_speaking ? UserStatusEvent::Type::kActiveSpeaking
+                                  : UserStatusEvent::Type::kInactiveSpeaking;
+    EmitStatusEvent(event_type, *user_snapshot);
   }
 }

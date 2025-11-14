@@ -13,7 +13,7 @@
 #include "ZoomSDK.h"
 #include "util/Checks.h"
 #include "util/Logger.h"
-#include "video/MediaConfig.h"
+#include "video/EncoderConfig.h"
 #include "zoom_bot_audio_delegate.h"
 #include "zoom_bot_internal.h"
 #include "zoom_bot_share_delegate.h"
@@ -23,10 +23,7 @@ namespace SDK = ZOOMSDK;
 
 namespace {
 
-// Global state management
 static GMainLoop* g_main_loop = nullptr;
-
-// Helpers now provided by internal
 
 static bool AuthenticationTimeout(std::mutex& auth_mutex, bool& auth_success, int timeout) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
@@ -52,7 +49,6 @@ static bool AuthenticationTimeout(std::mutex& auth_mutex, bool& auth_success, in
   return false;
 }
 
-// Helper: build HLS encoder/muxer config with defaults and optional overrides
 static void BuildHlsConfigs(const ZoomHlsVideoConfig* params, VideoEncoderConfig& video_config,
                             AudioEncoderConfig& audio_config, HlsMuxerConfig& muxer_config) {
   video_config = VideoEncoderConfig{};
@@ -81,7 +77,6 @@ static void BuildHlsConfigs(const ZoomHlsVideoConfig* params, VideoEncoderConfig
     if (params->hls_prefix) {
       muxer_config.hls_prefix = params->hls_prefix;
     }
-    // Audio parameters
     if (params->audio_sample_rate > 0) {
       audio_config.sample_rate = params->audio_sample_rate;
     }
@@ -100,15 +95,12 @@ static void BuildHlsConfigs(const ZoomHlsVideoConfig* params, VideoEncoderConfig
 extern "C" {
 #endif
 
-// === C API IMPLEMENTATION ===
-
 ZoomBotHandle zoom_bot_create(const char* sdk_key, const char* sdk_secret) {
   if (!sdk_key || !sdk_secret) {
     Logger::GetInstance().Error("Invalid SDK key or secret");
     return nullptr;
   }
 
-  // Create and initialize SDK
   SDKConfig config(std::string(sdk_key), std::string(sdk_secret), "https://zoom.us");
 
   ZoomSDK* sdk = new ZoomSDK();
@@ -173,7 +165,6 @@ MeetingHandle zoom_bot_meeting_create_and_join(ZoomBotHandle sdk_handle, const c
   bool raw_audio = (enable_audio != 0);
   bool raw_video = (enable_video != 0);
 
-  // Get required services from SDK
   auto* meeting_service = sdk->GetMeetingService();
   auto* setting_service = sdk->GetSettingService();
 
@@ -191,9 +182,11 @@ MeetingHandle zoom_bot_meeting_create_and_join(ZoomBotHandle sdk_handle, const c
 
   MeetingHandle meeting_handle = Impl::CreateMeetingHandle(meeting.get());
   auto* media_ctrl = meeting->GetMediaController();
+  auto* user_ctrl = meeting->GetUserController();
   ASSERT_NOT_NULL(media_ctrl);
+  ASSERT_NOT_NULL(user_ctrl);
   if (raw_audio) {
-    auto audioDelegate = std::make_unique<ZoomBotAudioRawDataDelegate>(media_ctrl);
+    auto audioDelegate = std::make_unique<ZoomBotAudioRawDataDelegate>(media_ctrl, user_ctrl);
     media_ctrl->SetAudioDelegate(std::move(audioDelegate));
   }
   if (raw_video) {
@@ -210,7 +203,6 @@ MeetingHandle zoom_bot_meeting_create_and_join(ZoomBotHandle sdk_handle, const c
         });
   }
 
-  // Join the meeting
   auto result = meeting->Join();
   if (result != SDK::SDKERR_SUCCESS) {
     Logger::GetInstance().Error("Failed to join meeting, code: " + std::to_string(result));
@@ -294,6 +286,12 @@ ZoomBotResult zoom_bot_meeting_set_user_status_callback(MeetingHandle meeting_ha
       case UserStatusEvent::Type::kShareStopped:
         out.event = ZOOM_USER_EVENT_TYPE_SHARE_STOPPED;
         break;
+      case UserStatusEvent::Type::kActiveSpeaking:
+        out.event = ZOOM_USER_EVENT_TYPE_ACTIVE_SPEAKING;
+        break;
+      case UserStatusEvent::Type::kInactiveSpeaking:
+        out.event = ZOOM_USER_EVENT_TYPE_INACTIVE_SPEAKING;
+        break;
     }
 
     out.user.id = evt.snapshot.id;
@@ -322,7 +320,6 @@ ZoomBotResult zoom_bot_meeting_set_audio_callback(MeetingHandle meeting_handle,
   auto& media_config = meeting->GetMediaController()->GetConfig();
 
   if (callback) {
-    // Wrap the C callback
     media_config.SetAudioCallback(
         [callback, meeting_handle](const uint8_t* pcmData, size_t pcmLength, uint32_t sampleRate,
                                    uint32_t channels, int audioType, uint32_t userId,
@@ -359,7 +356,6 @@ ZoomBotResult zoom_bot_meeting_set_hls_video_callback(MeetingHandle meeting_hand
     return ZOOM_BOT_SUCCESS;
   }
 
-  // Capture the user's callback in a lambda routed with the meeting handle
   MediaConfig::HlsFileCallback cb = [meeting_handle, callback](const char* filename,
                                                                const uint8_t* data, size_t size,
                                                                int is_playlist, uint64_t sequence) {
@@ -386,7 +382,6 @@ void zoom_bot_run_loop() {
   Logger::GetInstance().Info("Event loop stopped");
 }
 
-// Callback to quit the main loop, invoked on the loop's thread
 static gboolean quit_loop_callback(gpointer _) {
   if (g_main_loop && g_main_loop_is_running(g_main_loop)) {
     g_main_loop_quit(g_main_loop);

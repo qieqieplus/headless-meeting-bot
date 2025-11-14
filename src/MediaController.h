@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEDIA_CONTROLLER_H
-#define HEADLESS_ZOOM_BOT_MEDIA_CONTROLLER_H
+#pragma once
 
 #include <atomic>
 #include <cstdint>
@@ -114,5 +113,3 @@ class MediaController {
   bool use_raw_audio_;
   bool use_raw_video_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEDIA_CONTROLLER_H

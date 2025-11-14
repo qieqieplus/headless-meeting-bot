@@ -102,8 +102,7 @@ func (s *HTTPServer) handleJoinMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default behavior: if neither flag is explicitly enabled, default to audio recording
-	// This avoids the bot joining without requesting recording privilege.
+	// Default to audio recording
 	if !req.EnableAudio && !req.EnableVideo {
 		log.Warnf("JoinMeeting for %s without enable flags; defaulting enable_audio=true", req.MeetingID)
 		req.EnableAudio = true

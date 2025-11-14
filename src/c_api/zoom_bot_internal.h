@@ -1,5 +1,4 @@
-#ifndef ZOOM_BOT_INTERNAL_H
-#define ZOOM_BOT_INTERNAL_H
+#pragma once
 
 #include "zoom_bot_c.h"
 
@@ -19,5 +18,3 @@ void DestroyMeetingHandle(MeetingHandle meeting_handle);
 Meeting* GetMeetingFromHandle(MeetingHandle handle);
 
 }  // namespace Impl
-
-#endif  // ZOOM_BOT_INTERNAL_H

@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEDIA_CONFIG_H
-#define HEADLESS_ZOOM_BOT_MEDIA_CONFIG_H
+#pragma once
 
 #include <cstdint>
 #include <functional>
@@ -69,5 +68,3 @@ class MediaConfig {
   std::unique_ptr<HlsMuxerConfig> muxer_cfg_;
   std::string meeting_id_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEDIA_CONFIG_H

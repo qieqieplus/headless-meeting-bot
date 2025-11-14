@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20.2)
 project(headless_zoom_bot)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_COMPILER /usr/bin/g++)
 
 set(CMAKE_BUILD_TYPE Debug)

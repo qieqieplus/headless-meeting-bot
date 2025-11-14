@@ -32,12 +32,10 @@ func (p *BufferPool) Get(minSize int) []byte {
 	return buf[:minSize]
 }
 
-// Put returns a buffer to the pool
 func (p *BufferPool) Put(buf []byte) {
 	if buf == nil {
 		return
 	}
-	// Reset buffer length to capacity
 	buf = buf[:cap(buf)]
 	p.pool.Put(&buf)
 }

@@ -14,7 +14,7 @@ extern "C" {
 /* #include <libswscale/swscale.h> */
 }
 
-#include "MediaConfig.h"
+#include "EncoderConfig.h"
 
 // FFmpeg-based H.264 encoder with libx264 and h264_nvenc support
 class VideoEncoder {

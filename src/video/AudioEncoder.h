@@ -16,7 +16,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
-#include "MediaConfig.h"
+#include "EncoderConfig.h"
 
 // FFmpeg-based AAC audio encoder
 class AudioEncoder {

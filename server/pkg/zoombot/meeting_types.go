@@ -56,15 +56,17 @@ type MeetingConfig struct {
 type UserEventType int
 
 const (
-	UserEventSnapshot     UserEventType = UserEventType(native.UserEventSnapshot)
-	UserEventJoined       UserEventType = UserEventType(native.UserEventJoined)
-	UserEventLeft         UserEventType = UserEventType(native.UserEventLeft)
-	UserEventAudioMuted   UserEventType = UserEventType(native.UserEventAudioMuted)
-	UserEventAudioUnmuted UserEventType = UserEventType(native.UserEventAudioUnmuted)
-	UserEventVideoOn      UserEventType = UserEventType(native.UserEventVideoOn)
-	UserEventVideoOff     UserEventType = UserEventType(native.UserEventVideoOff)
-	UserEventShareStarted UserEventType = UserEventType(native.UserEventShareStarted)
-	UserEventShareStopped UserEventType = UserEventType(native.UserEventShareStopped)
+	UserEventSnapshot         UserEventType = UserEventType(native.UserEventSnapshot)
+	UserEventJoined           UserEventType = UserEventType(native.UserEventJoined)
+	UserEventLeft             UserEventType = UserEventType(native.UserEventLeft)
+	UserEventAudioMuted       UserEventType = UserEventType(native.UserEventAudioMuted)
+	UserEventAudioUnmuted     UserEventType = UserEventType(native.UserEventAudioUnmuted)
+	UserEventVideoOn          UserEventType = UserEventType(native.UserEventVideoOn)
+	UserEventVideoOff         UserEventType = UserEventType(native.UserEventVideoOff)
+	UserEventShareStarted     UserEventType = UserEventType(native.UserEventShareStarted)
+	UserEventShareStopped     UserEventType = UserEventType(native.UserEventShareStopped)
+	UserEventActiveSpeaking   UserEventType = UserEventType(native.UserEventActiveSpeaking)
+	UserEventInactiveSpeaking UserEventType = UserEventType(native.UserEventInactiveSpeaking)
 )
 
 // UserStatusEvent represents a user status event from C API

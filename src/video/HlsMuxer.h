@@ -5,7 +5,7 @@
 #include <string>
 
 #include "AvioMemorySink.h"
-#include "MediaConfig.h"
+#include "EncoderConfig.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -30,7 +30,6 @@ class HlsMuxer {
   // Write an encoded audio packet to the muxer
   bool WriteAudioPacket(AVPacket* pkt);
 
-  // Write a packet (deprecated - use writeVideoPacket or writeAudioPacket)
   bool WritePacket(AVPacket* pkt) { return WriteVideoPacket(pkt); }
 
   // Finalize muxing (writes trailer and final playlist with EXT-X-ENDLIST)

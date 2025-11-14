@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETING_CONFIG_H
-#define HEADLESS_ZOOM_BOT_MEETING_CONFIG_H
+#pragma once
 
 #include <string>
 
@@ -29,5 +28,3 @@ class MeetingConfig {
   bool UseRawVideo() const { return use_raw_video_; }
   bool UseRawRecording() const { return use_raw_audio_ || use_raw_video_; }
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETING_CONFIG_H

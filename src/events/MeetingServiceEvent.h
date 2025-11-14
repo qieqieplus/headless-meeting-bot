@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETINGSERVICEEVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGSERVICEEVENT_H
+#pragma once
 
 #include <functional>
 
@@ -51,5 +50,3 @@ class MeetingServiceEvent : public ZOOMSDK::IMeetingServiceEvent {
 
   void onMeetingFullToWatchLiveStream(const zchar_t* s_live_stream_url) override;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGSERVICEEVENT_H

@@ -1,5 +1,4 @@
-#ifndef ZOOM_BOT_SHARE_DELEGATE_H
-#define ZOOM_BOT_SHARE_DELEGATE_H
+#pragma once
 
 #include "rawdata/rawdata_renderer_interface.h"
 #include "zoom_bot_c.h"
@@ -20,5 +19,3 @@ class ZoomBotShareRendererDelegate : public ZOOMSDK::IZoomSDKRendererDelegate {
  private:
   MediaController* media_controller_;
 };
-
-#endif  // ZOOM_BOT_SHARE_DELEGATE_H

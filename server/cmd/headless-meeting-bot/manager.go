@@ -64,7 +64,7 @@ func (w *WorkerProcess) Stop() error {
 	}
 
 	log.Infof("Stopping worker process: %s (PID: %d)", w.MeetingID, w.PID)
-		w.Status = zoombot.StatusEnded
+	w.Status = zoombot.StatusEnded
 	w.stopped = true
 
 	if w.cmd == nil || w.cmd.Process == nil {
@@ -87,7 +87,7 @@ func (w *WorkerProcess) Stop() error {
 		log.Warnf("Failed to send SIGTERM to worker: %v", err)
 	}
 
-	if w.waitForStop(workerStopTimeout) {
+	if w.waitForStop(workerStopTimeout * 2) {
 		return nil
 	}
 

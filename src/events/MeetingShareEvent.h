@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_MEETINGSHAREEVENT_H
-#define HEADLESS_ZOOM_BOT_MEETINGSHAREEVENT_H
+#pragma once
 
 #include <functional>
 
@@ -26,5 +25,3 @@ class MeetingShareEvent : public ZOOMSDK::IMeetingShareCtrlEvent {
   void onOptimizingShareForVideoClipStatusChanged(
       ZOOMSDK::ZoomSDKSharingSourceInfo share_info) override;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_MEETINGSHAREEVENT_H

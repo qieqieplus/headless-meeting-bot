@@ -14,15 +14,17 @@ const (
 type UserEventType string
 
 const (
-	UserEventSnapshot     UserEventType = "snapshot"
-	UserEventJoined       UserEventType = "joined"
-	UserEventLeft         UserEventType = "left"
-	UserEventAudioMuted   UserEventType = "audio_muted"
-	UserEventAudioUnmuted UserEventType = "audio_unmuted"
-	UserEventVideoOn      UserEventType = "video_on"
-	UserEventVideoOff     UserEventType = "video_off"
-	UserEventShareStarted UserEventType = "share_started"
-	UserEventShareStopped UserEventType = "share_stopped"
+	UserEventSnapshot         UserEventType = "snapshot"
+	UserEventJoined           UserEventType = "joined"
+	UserEventLeft             UserEventType = "left"
+	UserEventAudioMuted       UserEventType = "audio_muted"
+	UserEventAudioUnmuted     UserEventType = "audio_unmuted"
+	UserEventVideoOn          UserEventType = "video_on"
+	UserEventVideoOff         UserEventType = "video_off"
+	UserEventShareStarted     UserEventType = "share_started"
+	UserEventShareStopped     UserEventType = "share_stopped"
+	UserEventActiveSpeaking   UserEventType = "active_speaking"
+	UserEventInactiveSpeaking UserEventType = "inactive_speaking"
 )
 
 // UserInfo represents user information

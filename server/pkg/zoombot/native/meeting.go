@@ -89,15 +89,17 @@ const (
 type UserEventType int
 
 const (
-	UserEventSnapshot     UserEventType = 0
-	UserEventJoined       UserEventType = 1
-	UserEventLeft         UserEventType = 2
-	UserEventAudioMuted   UserEventType = 3
-	UserEventAudioUnmuted UserEventType = 4
-	UserEventVideoOn      UserEventType = 5
-	UserEventVideoOff     UserEventType = 6
-	UserEventShareStarted UserEventType = 7
-	UserEventShareStopped UserEventType = 8
+	UserEventSnapshot         UserEventType = 0
+	UserEventJoined           UserEventType = 1
+	UserEventLeft             UserEventType = 2
+	UserEventAudioMuted       UserEventType = 3
+	UserEventAudioUnmuted     UserEventType = 4
+	UserEventVideoOn          UserEventType = 5
+	UserEventVideoOff         UserEventType = 6
+	UserEventShareStarted     UserEventType = 7
+	UserEventShareStopped     UserEventType = 8
+	UserEventActiveSpeaking   UserEventType = 9
+	UserEventInactiveSpeaking UserEventType = 10
 )
 
 // UserStatusEvent represents a user status event from C API

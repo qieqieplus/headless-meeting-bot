@@ -180,8 +180,8 @@ bool HlsMuxer::WriteVideoPacket(AVPacket* pkt) {
     return false;
   }
 
-  // Make a stack copy by referencing the original packet (no heap alloc)
-  AVPacket pkt_local = {};  // Initialize to zero (replaces deprecated av_init_packet)
+  // Make a stack copy by referencing the original packet
+  AVPacket pkt_local = {};
   if (av_packet_ref(&pkt_local, pkt) < 0) {
     return false;
   }
@@ -209,7 +209,7 @@ bool HlsMuxer::WriteAudioPacket(AVPacket* pkt) {
   }
 
   // Make a stack copy by referencing the original packet (no heap alloc)
-  AVPacket pkt_local = {};  // Initialize to zero (replaces deprecated av_init_packet)
+  AVPacket pkt_local = {};
   if (av_packet_ref(&pkt_local, pkt) < 0) {
     return false;
   }

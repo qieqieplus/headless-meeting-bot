@@ -1,5 +1,4 @@
-#ifndef HEADLESS_ZOOM_BOT_LOGGER_H
-#define HEADLESS_ZOOM_BOT_LOGGER_H
+#pragma once
 
 #include <chrono>
 #include <ctime>
@@ -157,5 +156,3 @@ class Logger {
   std::unique_ptr<std::ofstream> file_stream_;
   std::mutex mutex_;
 };
-
-#endif  // HEADLESS_ZOOM_BOT_LOGGER_H
