@@ -10,6 +10,7 @@ import (
 
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/config"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server/ws"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
@@ -28,14 +29,22 @@ func startServer() {
 	eventsBus := stream.NewEventBus()
 	videoBus := stream.NewVideoBus()
 
+	tracker := manifest.NewInMemoryTracker(manifest.Options{
+		AudioFormat: manifest.AudioFormat{
+			Encoding:   "S16LE",
+			SampleRate: cfg.AudioSampleRate,
+			Channels:   cfg.AudioChannels,
+		},
+	})
+
 	// Use ProcessManager for multi-process architecture to avoid GLib context conflicts
-	processManager, err := NewProcessManager(cfg.ZoomSDKKey, cfg.ZoomSDKSecret, audioBus, eventsBus, videoBus)
+	processManager, err := NewProcessManager(cfg.ZoomSDKKey, cfg.ZoomSDKSecret, audioBus, eventsBus, videoBus, tracker)
 	if err != nil {
 		log.Fatalf("Failed to create process manager: %v", err)
 	}
 
 	wsServer := ws.NewWebSocketServer(audioBus, eventsBus, videoBus, processManager, cfg)
-	httpServer := server.NewHTTPServer(processManager, wsServer)
+	httpServer := server.NewHTTPServer(processManager, wsServer, tracker)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,

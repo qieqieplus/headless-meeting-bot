@@ -53,7 +53,8 @@ struct UserStatusEvent {
   std::optional<ZOOMSDK::AudioStatus> audio_status;
   std::optional<ZOOMSDK::VideoStatus> video_status;
   std::optional<bool> share_status;
-  uint64_t timestamp_ms = 0;  // Media timeline timestamp for event alignment
+  uint64_t wall_ts_ms = 0;  // Absolute unix epoch timestamp
+  int64_t media_ts_ms = 0;  // Media timeline timestamp (can be negative for pre-recording events)
 };
 
 // Forward declaration
@@ -72,6 +73,9 @@ class UserController : public IUserEventSink {
   std::vector<UserSnapshot> GetUsers() const;
   std::optional<UserSnapshot> GetUser(unsigned int user_id) const;
 
+  // Returns the bot's own user ID
+  unsigned int GetBotUserId() const { return self_user_id_; }
+
   // Returns all current share sources available to view (across all sharers)
   std::vector<ZOOMSDK::ZoomSDKSharingSourceInfo> GetActiveShareSources() const;
 
@@ -85,19 +89,15 @@ class UserController : public IUserEventSink {
   // refresh users and active share sources.
   void InitializeState();
 
-  void OnShareStart(const ZOOMSDK::ZoomSDKSharingSourceInfo& info);
-  void OnShareEnd(const ZOOMSDK::ZoomSDKSharingSourceInfo& info);
-
   // IUserEventSink implementation
   void HandleParticipantJoin(unsigned int user_id);
   void HandleParticipantLeft(unsigned int user_id);
   void HandleAudioStatus(unsigned int user_id, ZOOMSDK::AudioStatus status);
   void HandleVideoStatus(unsigned int user_id, ZOOMSDK::VideoStatus status);
+  void HandleShareStatus(unsigned int user_id, const ZOOMSDK::ZoomSDKSharingSourceInfo& info, bool is_starting);
   void HandleSpeakingStatus(unsigned int user_id, bool is_speaking);
 
  private:
-  void HandleShareStatus(unsigned int user_id, bool is_sharing);
-
   void EnsureUserCached(unsigned int user_id);
 
   UserSnapshot MakeSnapshot(ZOOMSDK::IUserInfo* user_info) const;

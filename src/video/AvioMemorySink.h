@@ -62,6 +62,11 @@ class AvioMemorySink {
   // AVIO seek callback
   static int64_t Seek(void* opaque, int64_t offset, int whence);
 
+  // Helper methods for HLS processing
+  std::string NormalizePlaylistFilename(const std::string& filename) const;
+  void ProcessPlaylistFile(const std::string& filename, const std::vector<uint8_t>& data,
+                           uint64_t sequence, const HlsFileCallback& callback);
+
  private:
   HlsFileCallback fileCallback_;
   std::mutex mtx_;

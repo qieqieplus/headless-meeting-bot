@@ -1,6 +1,6 @@
 #include "zoom_bot_video_delegate.h"
 
-#include "MediaController.h"
+#include "controllers/Media.h"
 #include "zoom_sdk_raw_data_def.h"
 
 void ZoomBotVideoRendererDelegate::onRendererBeDestroyed() {
@@ -21,9 +21,8 @@ void ZoomBotVideoRendererDelegate::onRawDataFrameReceived(YUVRawDataI420* data) 
   uint64_t timestamp = data->GetTimeStamp();
 
   if (yBuffer && uBuffer && vBuffer && bufferLen > 0) {
-    // Push into encoding pipeline with camera data type
-    media_controller_->PushVideoI420ForSource(StreamKind::kCamera, sourceId, yBuffer, uBuffer,
-                                              vBuffer, width, height, timestamp);
+    media_controller_->PushVideoI420(StreamKind::kCamera, sourceId, yBuffer, uBuffer, vBuffer,
+                                     width, height, timestamp);
   }
 }
 

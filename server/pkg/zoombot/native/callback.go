@@ -17,7 +17,7 @@ import (
 
 // EventSink is implemented by upper layers to receive events for a meeting
 type EventSink interface {
-	OnAudio(data []byte, audioType int, nodeID uint64)
+	OnAudio(data []byte, audioType int, nodeID uint64, filename string)
 	OnMeetingStatusChanged(status MeetingStatus, detail int)
 	OnUserStatusEvent(event *UserStatusEvent)
 	OnHlsFile(filename string, data []byte, isPlaylist bool, sequence uint64)
@@ -49,13 +49,17 @@ func getEventSink(handle C.MeetingHandle) EventSink {
 }
 
 //export OnAudioDataReceived
-func OnAudioDataReceived(meetingHandle C.MeetingHandle, data unsafe.Pointer, length C.int, audioType C.int, nodeID C.uint) {
+func OnAudioDataReceived(meetingHandle C.MeetingHandle, data unsafe.Pointer, length C.int, audioType C.int, nodeID C.uint, filename *C.char) {
 	sink := getEventSink(meetingHandle)
 	if sink == nil {
 		log.Warnf("Received audio data for unknown meeting handle: %p", meetingHandle)
 		return
 	}
-	sink.OnAudio(ToSliceFromBytes[byte](data, uintptr(length)), int(audioType), uint64(nodeID))
+	filenameStr := ""
+	if filename != nil {
+		filenameStr = C.GoString(filename)
+	}
+	sink.OnAudio(ToSliceFromBytes[byte](data, uintptr(length)), int(audioType), uint64(nodeID), filenameStr)
 }
 
 //export OnMeetingStatusChanged
@@ -86,7 +90,8 @@ func OnUserStatusEvent(meetingHandle C.MeetingHandle, event *C.ZoomUserStatusEve
 		Audio:     int(event.user.audio),
 		Video:     int(event.user.video),
 		Share:     int(event.user.share),
-		Timestamp: uint64(event.timestamp_ms),
+		WallTs:    uint64(event.wall_ts_ms),
+		MediaTs:   int64(event.media_ts_ms),
 	}
 	sink.OnUserStatusEvent(&goEvent)
 }

@@ -1,4 +1,4 @@
-#include "UserController.h"
+#include "controllers/User.h"
 
 #include <algorithm>
 #include <utility>
@@ -8,7 +8,7 @@
 #include <locale>
 #endif
 
-#include "MediaController.h"
+#include "controllers/Media.h"
 #include "events/MeetingAudioEvent.h"
 #include "events/MeetingParticipantsEvent.h"
 #include "events/MeetingShareEvent.h"
@@ -17,6 +17,7 @@
 #include "meeting_service_interface.h"
 #include "util/Checks.h"
 #include "util/Logger.h"
+#include "util/TimelineClock.h"
 
 using namespace ZOOMSDK;
 
@@ -69,11 +70,7 @@ UserController::UserController(IMeetingService* meeting_service)
 
   share_ctrl_ = meeting_service_->GetMeetingShareController();
   ASSERT_NOT_NULL(share_ctrl_);
-  auto share_start_handler = [this](const ZoomSDKSharingSourceInfo& info) {
-    this->OnShareStart(info);
-  };
-  auto share_end_handler = [this](const ZoomSDKSharingSourceInfo& info) { this->OnShareEnd(info); };
-  share_event_ = std::make_unique<MeetingShareEvent>(share_start_handler, share_end_handler);
+  share_event_ = std::make_unique<MeetingShareEvent>(*this);
   share_ctrl_->SetEvent(share_event_.get());
 }
 
@@ -164,52 +161,77 @@ void UserController::InitializeState() {
       }
       if (auto* user_info = participants_ctrl_->GetUserByUserID(kUserId)) {
         auto snapshot = MakeSnapshot(user_info);
-        std::lock_guard<std::mutex> lock(mutex_);
-        users_[kUserId] = snapshot;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          users_[kUserId] = snapshot;
+        }
         EmitStatusEvent(UserStatusEvent::Type::kSnapshot, snapshot);
+        
+        // Notify MediaController of initial audio status to create streams for already-unmuted users
+        if (snapshot.audio_on && media_controller_) {
+          media_controller_->UpdateAudioStatus(kUserId, ZOOMSDK::Audio_UnMuted);
+        }
       }
     }
   }
 }
 
-void UserController::OnShareStart(const ZoomSDKSharingSourceInfo& info) {
-  HandleShareStatus(info.userid, true);
 
+
+void UserController::HandleShareStatus(unsigned int user_id, const ZoomSDKSharingSourceInfo& info, bool is_starting) {
+  EnsureUserCached(user_id);
+
+  // Update active share sources list
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = std::find_if(active_share_sources_.begin(), active_share_sources_.end(),
                            [&info](const ZoomSDKSharingSourceInfo& s) {
                              return s.shareSourceID == info.shareSourceID;
                            });
-    if (it != active_share_sources_.end()) {
-      active_share_sources_.erase(it);
-    }
-    active_share_sources_.push_back(info);
-  }
-
-  if (media_controller_) {
-    media_controller_->UpdateShareSources(GetActiveShareSources());
-  }
-}
-
-void UserController::OnShareEnd(const ZoomSDKSharingSourceInfo& info) {
-  HandleShareStatus(info.userid, false);
-
-  bool removed = false;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = std::find_if(active_share_sources_.begin(), active_share_sources_.end(),
-                           [&info](const ZoomSDKSharingSourceInfo& s) {
-                             return s.shareSourceID == info.shareSourceID;
-                           });
-    if (it != active_share_sources_.end()) {
-      active_share_sources_.erase(it);
-      removed = true;
+    
+    if (is_starting) {
+      // Remove if exists (to update), then add
+      if (it != active_share_sources_.end()) {
+        active_share_sources_.erase(it);
+      }
+      active_share_sources_.push_back(info);
+    } else {
+      // Remove from list when ending
+      if (it != active_share_sources_.end()) {
+        active_share_sources_.erase(it);
+      } else {
+        // Share source not found, nothing to do
+        return;
+      }
     }
   }
 
-  if (removed && media_controller_) {
-    media_controller_->UpdateShareSources(GetActiveShareSources());
+  // Update user snapshot
+  bool updated = UpdateUser(user_id, [is_starting](UserSnapshot& snapshot) {
+    return std::exchange(snapshot.sharing, is_starting) != is_starting;
+  });
+
+  if (updated) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (is_starting) {
+        sharing_users_.insert(user_id);
+      } else {
+        sharing_users_.erase(user_id);
+      }
+    }
+
+    if (media_controller_) {
+      media_controller_->UpdateShareSources(GetActiveShareSources());
+    }
+
+    if (auto callback = on_share_status_changed_) {
+      callback(user_id, is_starting);
+    }
+
+    EmitStatusEvent(
+        is_starting ? UserStatusEvent::Type::kShareStarted : UserStatusEvent::Type::kShareStopped,
+        GetUser(user_id).value(), std::nullopt, std::nullopt, is_starting);
   }
 }
 
@@ -267,6 +289,10 @@ void UserController::HandleAudioStatus(unsigned int user_id, AudioStatus status)
   });
 
   if (updated) {
+    if (media_controller_) {
+      media_controller_->UpdateAudioStatus(user_id, status);
+    }
+    
     if (auto callback = on_audio_status_changed_) {
       callback(user_id, status);
     }
@@ -286,6 +312,10 @@ void UserController::HandleVideoStatus(unsigned int user_id, VideoStatus status)
   });
 
   if (updated) {
+    if (media_controller_) {
+      media_controller_->UpdateCameraStatus(user_id, kVideoOn);
+    }
+
     if (auto callback = on_video_status_changed_) {
       callback(user_id, status);
     }
@@ -295,32 +325,6 @@ void UserController::HandleVideoStatus(unsigned int user_id, VideoStatus status)
   }
 }
 
-void UserController::HandleShareStatus(unsigned int user_id, bool is_sharing) {
-  EnsureUserCached(user_id);
-
-  bool updated = UpdateUser(user_id, [is_sharing](UserSnapshot& snapshot) {
-    return std::exchange(snapshot.sharing, is_sharing) != is_sharing;
-  });
-
-  if (updated) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (is_sharing) {
-        sharing_users_.insert(user_id);
-      } else {
-        sharing_users_.erase(user_id);
-      }
-    }
-
-    if (auto callback = on_share_status_changed_) {
-      callback(user_id, is_sharing);
-    }
-
-    EmitStatusEvent(
-        is_sharing ? UserStatusEvent::Type::kShareStarted : UserStatusEvent::Type::kShareStopped,
-        GetUser(user_id).value(), std::nullopt, std::nullopt, is_sharing);
-  }
-}
 
 void UserController::EnsureUserCached(unsigned int user_id) {
   {
@@ -354,10 +358,16 @@ void UserController::EmitStatusEvent(UserStatusEvent::Type type, const UserSnaps
                                      std::optional<ZOOMSDK::AudioStatus> audio,
                                      std::optional<ZOOMSDK::VideoStatus> video,
                                      std::optional<bool> share) {
-  UserStatusEvent event{type, snapshot, audio, video, share, 0};
+  UserStatusEvent event{type, snapshot, audio, video, share, 0, 0};
 
-  if (media_controller_ && media_controller_->TimelineReady()) {
-    event.timestamp_ms = media_controller_->Now();
+  // Always capture absolute wall time
+  event.wall_ts_ms = TimelineClock::SystemUnixMs();
+
+  // Always compute media timeline timestamp (can be negative for pre-recording events)
+  // This uses UnixToMediaSignedMs which returns 0 if timeline not set, 
+  // or signed offset (can be negative) once timeline is established
+  if (media_controller_) {
+    event.media_ts_ms = media_controller_->UnixToMediaSignedMs(event.wall_ts_ms);
   }
 
   if (auto callback = on_status_event_) {

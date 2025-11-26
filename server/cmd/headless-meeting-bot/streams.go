@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
 )
@@ -134,6 +135,16 @@ func (pm *ProcessManager) processAudioStream(worker *WorkerProcess, resp *http.R
 		if pm.audioBus != nil {
 			pm.audioBus.Publish(worker.MeetingID, &frame)
 		}
+		// Notify manifest tracker of audio segment
+		if pm.manifest != nil && frame.Filename != "" {
+			trackType := manifest.AudioTrackUser
+			if frame.Type == stream.AudioTypeMixed {
+				trackType = manifest.AudioTrackMixed
+			} else if frame.Type == stream.AudioTypeShare {
+				trackType = manifest.AudioTrackShare
+			}
+			pm.manifest.OnAudioSegment(worker.MeetingID, frame.Filename, trackType, frame.UserID)
+		}
 		return nil
 	})
 }
@@ -154,8 +165,12 @@ func (pm *ProcessManager) processEventsStream(worker *WorkerProcess, resp *http.
 			worker.Status = pm.mapEventStatusToMeetingStatus(event.Status)
 		}
 
+		eventCopy := event
+
+		pm.handleManifestEvent(&eventCopy)
+
 		if pm.eventsBus != nil {
-			pm.eventsBus.Publish(event.MeetingID, &event)
+			pm.eventsBus.Publish(eventCopy.MeetingID, &eventCopy)
 		}
 		return nil
 	})
@@ -179,6 +194,9 @@ func (pm *ProcessManager) processVideoStream(worker *WorkerProcess, resp *http.R
 		} else {
 			log.Warnf("[video] videoBus is nil; dropping file: %s", fileEvent.Filename)
 		}
+
+		pm.handleManifestVideoFile(&fileEvent)
+
 		return nil
 	})
 }

@@ -11,13 +11,22 @@ import (
 type MeetingStatus int
 
 const (
-	StatusIdle         MeetingStatus = MeetingStatus(native.StatusIdle)
-	StatusConnecting   MeetingStatus = MeetingStatus(native.StatusConnecting)
-	StatusInMeeting    MeetingStatus = MeetingStatus(native.StatusInMeeting)
-	StatusReconnecting MeetingStatus = MeetingStatus(native.StatusReconnecting)
-	StatusFailed       MeetingStatus = MeetingStatus(native.StatusFailed)
-	StatusEnded        MeetingStatus = MeetingStatus(native.StatusEnded)
-	StatusUnknown      MeetingStatus = MeetingStatus(native.StatusUnknown)
+	StatusIdle              MeetingStatus = MeetingStatus(native.StatusIdle)
+	StatusConnecting        MeetingStatus = MeetingStatus(native.StatusConnecting)
+	StatusWaitingForHost    MeetingStatus = MeetingStatus(native.StatusWaitingForHost)
+	StatusInMeeting         MeetingStatus = MeetingStatus(native.StatusInMeeting)
+	StatusDisconnecting     MeetingStatus = MeetingStatus(native.StatusDisconnecting)
+	StatusReconnecting      MeetingStatus = MeetingStatus(native.StatusReconnecting)
+	StatusFailed            MeetingStatus = MeetingStatus(native.StatusFailed)
+	StatusEnded             MeetingStatus = MeetingStatus(native.StatusEnded)
+	StatusUnknown           MeetingStatus = MeetingStatus(native.StatusUnknown)
+	StatusLocked            MeetingStatus = MeetingStatus(native.StatusLocked)
+	StatusUnlocked          MeetingStatus = MeetingStatus(native.StatusUnlocked)
+	StatusInWaitingRoom     MeetingStatus = MeetingStatus(native.StatusInWaitingRoom)
+	StatusWebinarPromote    MeetingStatus = MeetingStatus(native.StatusWebinarPromote)
+	StatusWebinarDepromote  MeetingStatus = MeetingStatus(native.StatusWebinarDepromote)
+	StatusJoinBreakoutRoom  MeetingStatus = MeetingStatus(native.StatusJoinBreakoutRoom)
+	StatusLeaveBreakoutRoom MeetingStatus = MeetingStatus(native.StatusLeaveBreakoutRoom)
 )
 
 func (s MeetingStatus) String() string {
@@ -26,8 +35,12 @@ func (s MeetingStatus) String() string {
 		return "idle"
 	case StatusConnecting:
 		return "connecting"
+	case StatusWaitingForHost:
+		return "waiting_for_host"
 	case StatusInMeeting:
 		return "in_meeting"
+	case StatusDisconnecting:
+		return "disconnecting"
 	case StatusReconnecting:
 		return "reconnecting"
 	case StatusFailed:
@@ -36,6 +49,20 @@ func (s MeetingStatus) String() string {
 		return "ended"
 	case StatusUnknown:
 		return "unknown"
+	case StatusLocked:
+		return "locked"
+	case StatusUnlocked:
+		return "unlocked"
+	case StatusInWaitingRoom:
+		return "in_waiting_room"
+	case StatusWebinarPromote:
+		return "webinar_promote"
+	case StatusWebinarDepromote:
+		return "webinar_depromote"
+	case StatusJoinBreakoutRoom:
+		return "join_breakout_room"
+	case StatusLeaveBreakoutRoom:
+		return "leave_breakout_room"
 	default:
 		return "unknown"
 	}
@@ -43,14 +70,16 @@ func (s MeetingStatus) String() string {
 
 // MeetingConfig holds the configuration for joining a meeting
 type MeetingConfig struct {
-	MeetingID   string
-	Password    string
-	DisplayName string
-	JoinToken   string
-	EnableAudio bool
-	EnableVideo bool
-	SDKKey      string
-	SDKSecret   string
+	MeetingID     string
+	Password      string
+	DisplayName   string
+	JoinToken     string
+	EnableAudio   bool
+	EnableVideo   bool
+	SDKKey        string
+	SDKSecret     string
+	AudioEncoding string
+	AudioBitrate  int
 }
 
 type UserEventType int
@@ -69,6 +98,13 @@ const (
 	UserEventInactiveSpeaking UserEventType = UserEventType(native.UserEventInactiveSpeaking)
 )
 
+// AudioType constants for audio stream types
+const (
+	AudioTypeMixed  = native.AudioTypeMixed  // Mixed audio from all participants
+	AudioTypeOneWay = native.AudioTypeOneWay // One-way audio from a specific user
+	AudioTypeShare  = native.AudioTypeShare  // Audio from screen share
+)
+
 // UserStatusEvent represents a user status event from C API
 type UserStatusEvent struct {
 	EventType UserEventType
@@ -77,7 +113,8 @@ type UserStatusEvent struct {
 	Audio     int
 	Video     int
 	Share     int
-	Timestamp uint64
+	WallTs    uint64 // Absolute unix epoch timestamp in milliseconds
+	MediaTs   int64  // Media timeline timestamp in ms (can be negative for pre-recording events)
 }
 
 // MeetingStatistics holds statistics for a meeting

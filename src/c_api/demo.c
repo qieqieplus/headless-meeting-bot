@@ -29,7 +29,7 @@ void signal_handler(int signum) {
 
 // Audio callback
 void audio_callback(MeetingHandle meeting_handle, const void* data, int length, int type,
-                    unsigned int node_id) {
+                    unsigned int node_id, const char* filename) {
   const char* type_str = "UNKNOWN";
   switch (type) {
     case ZOOM_AUDIO_TYPE_MIXED:
@@ -190,7 +190,7 @@ int main(int argc, char* argv[]) {
   printf("User status callback registered\n");
 
   if (enable_audio) {
-    zoom_bot_meeting_set_audio_callback(meeting, audio_callback);
+    zoom_bot_meeting_set_audio_callback(meeting, audio_callback, NULL);
     printf("Audio callback registered\n");
   }
 

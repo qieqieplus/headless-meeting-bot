@@ -83,11 +83,13 @@ headless-meeting-bot/
 │   └── Meeting.{h,cpp}    # 会议管理
 ├── server/                # Go 服务实现
 │   ├── cmd/               # Web APP 入口
-│   ├── pkg/
-│   │   ├── audio/        # 音频总线
-│   │   ├── zoomsdk/      # SDK 绑定
-│   │   └── server/       # HTTP/WS 服务
-│   └── docker/           # Docker 部署
+│   └── pkg/
+│       ├── stream/       # 流媒体总线（音频、视频、事件）
+│       ├── zoomsdk/      # SDK 绑定
+│       ├── server/       # HTTP/WS 服务
+│       ├── config/       # 配置管理
+│       └── log/          # 日志工具
+├── docker/               # Docker 部署配置
 ├── jna/                  # Java Bindings（JNA）
 └── lib/                  # 第三方库
     ├── zoomsdk/          # Zoom SDK

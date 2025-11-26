@@ -1,6 +1,6 @@
 #include "zoom_bot_share_delegate.h"
 
-#include "MediaController.h"
+#include "controllers/Media.h"
 
 void ZoomBotShareRendererDelegate::onRendererBeDestroyed() {
   // Renderer is being destroyed, cleanup if needed
@@ -22,9 +22,8 @@ void ZoomBotShareRendererDelegate::onRawDataFrameReceived(YUVRawDataI420* data) 
   uint64_t timestamp = data->GetTimeStamp();
 
   if (yBuffer && uBuffer && vBuffer && bufferLen > 0) {
-    // Push into encoding pipeline with share data type
-    media_controller_->PushVideoI420ForSource(StreamKind::kShare, sourceId, yBuffer, uBuffer,
-                                              vBuffer, width, height, timestamp);
+    media_controller_->PushVideoI420(StreamKind::kShare, sourceId, yBuffer, uBuffer, vBuffer, width,
+                                     height, timestamp);
   }
 }
 

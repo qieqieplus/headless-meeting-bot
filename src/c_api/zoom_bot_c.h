@@ -28,7 +28,8 @@ typedef void* MeetingHandle;
 
 // Audio callback function type
 typedef void (*OnAudioDataReceivedCallback)(MeetingHandle meeting_handle, const void* data,
-                                            int length, int type, unsigned int node_id);
+                                            int length, int type, unsigned int user_id,
+                                            const char* filename);
 
 // HLS file callback - called when muxer writes a file (init.mp4, segments,
 // playlist)
@@ -73,7 +74,8 @@ typedef struct {
 typedef struct {
   ZoomUserEventType event;  // What happened
   ZoomUserStatus user;      // Current user state
-  uint64_t timestamp_ms;    // Media timeline timestamp for event alignment
+  uint64_t wall_ts_ms;      // Absolute unix epoch timestamp
+  int64_t media_ts_ms;      // Media timeline timestamp for event alignment (can be negative)
 } ZoomUserStatusEvent;
 
 typedef void (*OnUserStatusEventCallback)(MeetingHandle meeting_handle,
@@ -158,35 +160,57 @@ ZOOM_BOT_C_API ZoomBotResult zoom_bot_meeting_set_status_callback(MeetingHandle 
 ZOOM_BOT_C_API ZoomBotResult zoom_bot_meeting_set_user_status_callback(
     MeetingHandle meeting_handle, OnUserStatusEventCallback callback);
 
+// Audio encoding format
+typedef enum {
+  ZOOM_AUDIO_ENCODING_S16LE = 0,  // Raw PCM (default)
+  ZOOM_AUDIO_ENCODING_AAC = 1,    // AAC-LC encoded
+  ZOOM_AUDIO_ENCODING_MP3 = 2     // MP3 encoded
+} ZoomAudioEncoding;
+
+// Audio configuration for callback
+typedef struct {
+  int sample_rate;             // Sample rate in Hz: 8000, 16000, 32000 (default), 44100, 48000
+  int channels;                // Number of channels: 1 (mono, default), 2 (stereo)
+  ZoomAudioEncoding encoding;  // Encoding format (default: ZOOM_AUDIO_ENCODING_S16LE)
+  int bitrate_kbps;  // Bitrate for encoded formats: 64-320 kbps (default: 128); ignored for S16LE
+} ZoomAudioConfig;
+
 /**
- * Set audio callback for receiving raw audio data
+ * Set audio callback for receiving audio data (raw PCM or encoded)
  * @param meeting_handle The meeting handle
- * @param callback The audio callback function
+ * @param callback The audio callback function (NULL removes existing callback)
+ * @param config Audio configuration; NULL uses defaults (32000 Hz, mono, S16LE)
  * @return ZoomBotResult indicating success or failure
+ *
+ * Default configuration (when config is NULL):
+ * - sample_rate: 32000 Hz
+ * - channels: 1 (mono)
+ * - encoding: ZOOM_AUDIO_ENCODING_S16LE (raw PCM)
+ * - bitrate_kbps: 128 (ignored for S16LE)
  */
 ZOOM_BOT_C_API ZoomBotResult zoom_bot_meeting_set_audio_callback(
-    MeetingHandle meeting_handle, OnAudioDataReceivedCallback callback);
+    MeetingHandle meeting_handle, OnAudioDataReceivedCallback callback,
+    const ZoomAudioConfig* config);
 
 // HLS video encoder/muxer configuration
 typedef struct {
-  int width;               // <=0 auto-detected from first frame
-  int height;              // <=0 auto-detected from first frame
-  int fps;                 // e.g., 10 (default)
-  int bitrate_kbps;        // e.g., 3000 (default)
-  const char* encoder;     // "auto" (default), "x264", "nvenc"
-  const char* preset;      // "veryfast" (default), "medium", "slow", etc.
-  const char* hls_prefix;  // "media" (default) - base name for playlist/segments
-  // Audio parameters
-  int audio_sample_rate;   // e.g., 32000 (default), 44100, 32000, etc.
-  int audio_channels;      // e.g., 1 (default stereo), 1 (mono)
-  int audio_bitrate_kbps;  // e.g., 128 (default), 96, 192, etc.
+  int width;               // Video width in pixels; <=0 auto-detected from first frame
+  int height;              // Video height in pixels; <=0 auto-detected from first frame
+  int fps;                 // Frames per second (default: 10)
+  int bitrate_kbps;        // Video bitrate in kbps (default: 3000)
+  const char* encoder;     // Encoder: "auto" (default), "x264", "nvenc"
+  const char* preset;      // Encoding preset: "veryfast" (default), "medium", "slow"
+  const char* hls_prefix;  // Base name for playlist/segments (default: "media")
+  // Audio parameters for HLS muxing
+  int audio_sample_rate;   // Audio sample rate in Hz (default: 32000)
+  int audio_channels;      // Audio channels: 1 (mono, default), 2 (stereo)
+  int audio_bitrate_kbps;  // Audio bitrate in kbps (default: 128)
 } ZoomHlsVideoConfig;
 
 /**
  * Set HLS video callback and start encoding/muxing
  * @param meeting_handle The meeting handle
- * @param callback HLS file callback (NULL clears existing callback and stops
- * encoding)
+ * @param callback HLS file callback (NULL clears existing callback and stops encoding)
  * @param config HLS encoder/muxer config; NULL uses defaults
  */
 ZOOM_BOT_C_API ZoomBotResult zoom_bot_meeting_set_hls_video_callback(

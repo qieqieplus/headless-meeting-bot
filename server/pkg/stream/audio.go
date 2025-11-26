@@ -29,9 +29,10 @@ func (t AudioType) String() string {
 
 // AudioEvent represents a single audio event from the Zoom SDK
 type AudioEvent struct {
-	Type   AudioType // Audio type
-	UserID uint64    // Speaker/source identifier
-	Data   []byte    // PCM audio data (S16LE) - pooled buffer
+	Type     AudioType // Audio type
+	UserID   uint64    // Speaker/source identifier
+	Data     []byte    // PCM audio data (S16LE) - pooled buffer
+	Filename string    // Logical filename from C++ (e.g., "meeting_id/t0/user_id/mixed_t0.wav")
 }
 
 var AudioEventHeaderSize = 2 * binary.Size(uint64(0)) // Type + UserID
@@ -45,15 +46,6 @@ func NewAudioEvent(audioType AudioType, userID uint64, cData []byte) *AudioEvent
 		UserID: userID,
 		Data:   buf,
 	}
-}
-
-// Encode serializes the frame for WebSocket transmission.
-func (f *AudioEvent) Encode() []byte {
-	buf := make([]byte, AudioEventHeaderSize+len(f.Data))
-	binary.LittleEndian.PutUint64(buf[0:8], uint64(f.Type))
-	binary.LittleEndian.PutUint64(buf[8:16], f.UserID)
-	copy(buf[AudioEventHeaderSize:], f.Data)
-	return buf
 }
 
 // Release returns the underlying buffer to the pool. Safe to call once.

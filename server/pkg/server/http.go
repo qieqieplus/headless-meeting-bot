@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/server/ws"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
 )
@@ -15,14 +16,16 @@ type HTTPServer struct {
 	meetingManager zoombot.MeetingManager
 	wsServer       *ws.WebSocketServer
 	router         http.Handler
+	manifest       manifest.Tracker
 }
 
 // writeJSONError has been moved to pkg/server/errors.go
 
-func NewHTTPServer(manager zoombot.MeetingManager, wsServer *ws.WebSocketServer) *HTTPServer {
+func NewHTTPServer(manager zoombot.MeetingManager, wsServer *ws.WebSocketServer, tracker manifest.Tracker) *HTTPServer {
 	server := &HTTPServer{
 		meetingManager: manager,
 		wsServer:       wsServer,
+		manifest:       tracker,
 		router:         http.NewServeMux(),
 	}
 	server.registerRoutes()
@@ -44,10 +47,11 @@ func (s *HTTPServer) registerRoutes() {
 	pr.Handle("/ws/audio/{meeting_id}", s.wsServer.HandleAudioConnection)
 	pr.Handle("/ws/events/{meeting_id}", s.wsServer.HandleEventsConnection)
 	pr.Handle("/ws/video/{meeting_id}", s.wsServer.HandleVideoConnection)
+	pr.Handle("/api/meetings/{meeting_id}/manifest", http.HandlerFunc(s.handleGetManifest))
 
-	// Delegate: if path starts with /ws/, use param router; else use mux
+	// Delegate: if path starts with /ws/ or manifest route, use param router; else use mux
 	s.router = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/ws/") {
+		if strings.HasPrefix(r.URL.Path, "/ws/") || strings.Contains(r.URL.Path, "/manifest") {
 			pr.ServeHTTP(w, r)
 			return
 		}
@@ -180,4 +184,48 @@ func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":        "ok",
 		"meeting_count": s.meetingManager.GetMeetingCount(),
 	})
+}
+
+func (s *HTTPServer) handleGetManifest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		WriteJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract meeting_id from path using ParamRouter context
+	paramsVal := r.Context().Value("path_params")
+	if paramsVal == nil {
+		WriteJSONError(w, "Missing meeting_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	params, ok := paramsVal.(map[string]string)
+	if !ok {
+		WriteJSONError(w, "Invalid path parameters", http.StatusBadRequest)
+		return
+	}
+
+	meetingIDStr := params["meeting_id"]
+	if meetingIDStr == "" {
+		WriteJSONError(w, "Invalid meeting_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	manifestData, err := s.manifest.GetManifest(meetingIDStr)
+	if err != nil {
+		if errors.Is(err, manifest.ErrMeetingNotFound) {
+			WriteJSONError(w, "Meeting manifest not found", http.StatusNotFound)
+		} else {
+			log.Errorf("Failed to get manifest for meeting %s: %v", meetingIDStr, err)
+			WriteJSONError(w, "Internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(manifestData); err != nil {
+		log.Errorf("Failed to encode manifest for meeting %s: %v", meetingIDStr, err)
+	}
 }

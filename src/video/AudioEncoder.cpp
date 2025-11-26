@@ -26,6 +26,10 @@ const AVCodec* AudioEncoder::SelectCodec(const std::string& codec_name) {
     codec = avcodec_find_encoder_by_name("libfdk_aac");
   }
 
+  if (!codec && (codec_name == "mp3" || codec_name == "libmp3lame")) {
+    codec = avcodec_find_encoder_by_name("libmp3lame");
+  }
+
   if (!codec) {
     codec = avcodec_find_encoder_by_name("aac");
   }
@@ -33,14 +37,20 @@ const AVCodec* AudioEncoder::SelectCodec(const std::string& codec_name) {
   if (codec) {
     Logger::GetInstance().Info(std::string("Audio Encoder: ") + codec->name);
   } else {
-    Logger::GetInstance().Error("No AAC encoder available");
+    Logger::GetInstance().Error("No AAC/MP3 encoder available");
   }
 
   return codec;
 }
 
 bool AudioEncoder::ConfigureEncoder(AVCodecContext* ctx, const AVCodec* codec) {
-  ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;  // AAC typically uses planar float
+  // MP3 uses S16P (signed 16-bit planar), AAC uses FLTP (float planar)
+  if (std::string(codec->name).find("mp3") != std::string::npos) {
+    ctx->sample_fmt = AV_SAMPLE_FMT_S16P;
+  } else {
+    ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;  // AAC typically uses planar float
+  }
+
   ctx->sample_rate = audioConfig_.sample_rate;
   ctx->bit_rate = audioConfig_.bitrate_kbps * 1000;
   ctx->time_base = AVRational{1, audioConfig_.sample_rate};
@@ -56,7 +66,11 @@ bool AudioEncoder::ConfigureEncoder(AVCodecContext* ctx, const AVCodec* codec) {
     return false;
   }
 
-  ctx->profile = FF_PROFILE_AAC_LOW;
+  // AAC-specific settings (not needed for MP3)
+  if (std::string(codec->name).find("aac") != std::string::npos) {
+    ctx->profile = FF_PROFILE_AAC_LOW;
+  }
+
   ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
   return true;

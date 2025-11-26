@@ -27,6 +27,8 @@ type Config struct {
 	// Audio configuration
 	AudioSampleRate int
 	AudioChannels   int
+	AudioEncoding   string
+	AudioBitrate    int
 
 	// WebSocket configuration
 	WebSocket WebSocketConfig
@@ -38,6 +40,8 @@ func Load() *Config {
 		LogLevel:        "info",
 		AudioSampleRate: 32000,
 		AudioChannels:   1,
+		AudioEncoding:   "S16LE", // Default to raw PCM for backward compatibility if needed, or "MP3"
+		AudioBitrate:    128,
 
 		// WebSocket defaults
 		WebSocket: WebSocketConfig{
@@ -69,6 +73,14 @@ func Load() *Config {
 	if channels := os.Getenv("AUDIO_CHANNELS"); channels != "" {
 		if ch, err := strconv.Atoi(channels); err == nil {
 			cfg.AudioChannels = ch
+		}
+	}
+	if encoding := os.Getenv("AUDIO_ENCODING"); encoding != "" {
+		cfg.AudioEncoding = encoding
+	}
+	if bitrate := os.Getenv("AUDIO_BITRATE"); bitrate != "" {
+		if br, err := strconv.Atoi(bitrate); err == nil {
+			cfg.AudioBitrate = br
 		}
 	}
 

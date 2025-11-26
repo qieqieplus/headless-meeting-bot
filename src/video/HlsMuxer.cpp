@@ -65,8 +65,8 @@ bool HlsMuxer::OpenMuxer() {
 
   // Configure HLS options
   std::string playlist_name = muxerConfig_.hls_prefix + ".m3u8";
-  std::string init_filename = muxerConfig_.hls_prefix + "-init.mp4";
-  std::string segment_filename = muxerConfig_.hls_prefix + "-part-%05d.m4s";
+  std::string init_filename = muxerConfig_.hls_prefix + "_init.mp4";
+  std::string segment_filename = muxerConfig_.hls_prefix + "_part_%05d.m4s";
 
   av_opt_set(fmtCtx_->priv_data, "hls_segment_type", kHlsSegmentType, 0);
   av_opt_set(fmtCtx_->priv_data, "hls_fmp4_init_filename", init_filename.c_str(), 0);

@@ -12,8 +12,8 @@ struct HlsMuxerConfig;
 
 enum class StreamKind { kCamera, kShare };
 
-constexpr const char* kCameraSuffix = "cam-";
-constexpr const char* kShareSuffix = "share-";
+constexpr const char* kCameraSuffix = "user";
+constexpr const char* kShareSuffix = "share";
 
 struct StreamKey {
   StreamKind kind;
@@ -21,50 +21,37 @@ struct StreamKey {
   bool operator==(const StreamKey& other) const { return kind == other.kind && id == other.id; }
 };
 
-namespace std {
-template <>
-struct hash<StreamKey> {
+struct StreamKeyHash {
   size_t operator()(const StreamKey& key) const {
     return std::hash<int>()(static_cast<int>(key.kind)) ^ (std::hash<unsigned int>()(key.id) << 1);
   }
 };
-}  // namespace std
 
-class MediaConfig {
+class VideoConfig {
  public:
   using HlsFileCallback = std::function<void(const char* filename, const uint8_t* data, size_t size,
                                              int is_playlist, uint64_t sequence)>;
-  using AudioCallback = std::function<void(const uint8_t* pcm_data, size_t pcm_length,
-                                           uint32_t sample_rate, uint32_t channels, int audio_type,
-                                           uint32_t user_id, uint64_t timestamp_ms)>;
 
-  MediaConfig() = default;
-  explicit MediaConfig(std::string meeting_id);
-  ~MediaConfig() = default;
+  VideoConfig();
+  ~VideoConfig();
 
   // Setters
-  void SetAudioCallback(AudioCallback cb);
-  void ClearAudioCallback();
   void SetHlsMediaCallback(const VideoEncoderConfig& v, const AudioEncoderConfig& a,
                            const HlsMuxerConfig& m, HlsFileCallback cb);
   void ClearHlsMediaParams();
 
-  // Getters - return copies/snapshots for safe use without external locks
-  AudioCallback GetAudioCallback() const;
+  // Getters
   HlsFileCallback GetHlsFileCallback() const;
-
-  // Stream-specific config getters that apply stream-type modifications
-  std::unique_ptr<AudioEncoderConfig> GetAudioEncoderConfig() const;
-  std::unique_ptr<VideoEncoderConfig> GetVideoEncoderConfigForStream(const StreamKey& key) const;
-  std::unique_ptr<HlsMuxerConfig> GetMuxerConfigForStream(const StreamKey& key) const;
-  std::string GetStreamSuffix(const StreamKey& key) const;
+  std::unique_ptr<AudioEncoderConfig> CreateAudioConfig() const;
+  std::unique_ptr<VideoEncoderConfig> CreateVideoConfig(const StreamKey& key) const;
+  std::unique_ptr<HlsMuxerConfig> CreateHlsConfig(const StreamKey& key) const;
+  std::string GetStreamType(const StreamKey& key) const;
 
  private:
   mutable std::mutex mtx_;
-  AudioCallback audio_callback_;
   HlsFileCallback hls_file_callback_;
+
   std::unique_ptr<VideoEncoderConfig> video_cfg_;
   std::unique_ptr<AudioEncoderConfig> audio_cfg_;
   std::unique_ptr<HlsMuxerConfig> muxer_cfg_;
-  std::string meeting_id_;
 };

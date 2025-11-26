@@ -49,17 +49,26 @@ add_library(zoombot_c SHARED
         video/AvioMemorySink.h
         video/MediaEncodePipeline.cpp
         video/MediaEncodePipeline.h
-        MediaConfig.cpp
-        MediaConfig.h
+        video/AudioEncodePipeline.cpp
+        video/AudioEncodePipeline.h
+        controllers/AudioConfig.cpp
+        controllers/AudioConfig.h
+        controllers/VideoConfig.cpp
+        controllers/VideoConfig.h
         util/TimelineClock.h
         ZoomSDK.cpp
         ZoomSDK.h
         Meeting.cpp
         Meeting.h
-        MediaController.cpp
-        MediaController.h
-        UserController.cpp
-        UserController.h
+        controllers/Media.cpp
+        controllers/Media.h
+        controllers/Video.cpp
+        controllers/Video.h
+        controllers/Audio.cpp
+        controllers/Audio.h
+        controllers/BaseStream.h
+        controllers/User.cpp
+        controllers/User.h
         SDKConfig.cpp
         SDKConfig.h
         MeetingConfig.cpp

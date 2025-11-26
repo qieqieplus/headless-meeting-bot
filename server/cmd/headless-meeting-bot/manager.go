@@ -8,12 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
 	. "github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
@@ -43,6 +46,9 @@ type ProcessManager struct {
 	maxPort     int
 	workerBin   string
 	callbackURL string
+	manifest    manifest.Tracker
+	manifestMu  sync.RWMutex
+	meetingT0   map[string]int64
 }
 
 // WorkerProcess represents a running meeting worker process
@@ -107,7 +113,7 @@ func (w *WorkerProcess) waitForStop(timeout time.Duration) bool {
 	}
 }
 
-func NewProcessManager(sdkKey, sdkSecret string, audioBus *stream.AudioBus, eventsBus *stream.EventBus, videoBus *stream.VideoBus) (*ProcessManager, error) {
+func NewProcessManager(sdkKey, sdkSecret string, audioBus *stream.AudioBus, eventsBus *stream.EventBus, videoBus *stream.VideoBus, tracker manifest.Tracker) (*ProcessManager, error) {
 	workerBin, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable path: %w", err)
@@ -130,6 +136,8 @@ func NewProcessManager(sdkKey, sdkSecret string, audioBus *stream.AudioBus, even
 		basePort:  basePort,
 		maxPort:   maxPort,
 		workerBin: workerBin,
+		manifest:  tracker,
+		meetingT0: make(map[string]int64),
 	}, nil
 }
 
@@ -296,6 +304,7 @@ func (pm *ProcessManager) monitorWorker(worker *WorkerProcess) {
 	close(worker.stopChan)
 	pm.workers.Delete(worker.MeetingID)
 	pm.usedPorts.Delete(worker.Port)
+	pm.handleManifestMeetingEnd(worker.MeetingID)
 }
 
 // GetMeeting returns a worker process by meeting ID
@@ -429,4 +438,90 @@ func (pm *ProcessManager) GetMeetingCount() int {
 		return true
 	})
 	return count
+}
+
+func (pm *ProcessManager) handleManifestEvent(event *stream.Event) {
+	if pm.manifest == nil || event == nil || event.MeetingID == "" {
+		return
+	}
+	pm.ensureManifestStart(event)
+	pm.manifest.OnUserEvent(event)
+}
+
+func (pm *ProcessManager) ensureManifestStart(event *stream.Event) {
+	if event.MediaTs == 0 || event.WallTs == 0 {
+		return
+	}
+
+	pm.manifestMu.RLock()
+	_, exists := pm.meetingT0[event.MeetingID]
+	pm.manifestMu.RUnlock()
+	if exists {
+		return
+	}
+
+	t0 := event.WallTs - event.MediaTs
+
+	pm.manifestMu.Lock()
+	if _, exists := pm.meetingT0[event.MeetingID]; !exists {
+		pm.meetingT0[event.MeetingID] = t0
+		pm.manifestMu.Unlock()
+		pm.manifest.OnMeetingStart(event.MeetingID, t0)
+		return
+	}
+	pm.manifestMu.Unlock()
+}
+
+func (pm *ProcessManager) handleManifestMeetingEnd(meetingID string) {
+	if pm.manifest == nil || meetingID == "" {
+		return
+	}
+	pm.manifest.OnMeetingEnd(meetingID)
+	pm.manifestMu.Lock()
+	delete(pm.meetingT0, meetingID)
+	pm.manifestMu.Unlock()
+}
+
+func (pm *ProcessManager) handleManifestVideoFile(fileEvent *stream.FileEvent) {
+	if pm.manifest == nil || fileEvent == nil || !fileEvent.IsPlaylist {
+		return
+	}
+
+	userID, trackType, ok := parseVideoFilename(fileEvent.Filename)
+	if !ok {
+		return
+	}
+
+	// Parse timestamp from filename - OnVideoSegment will handle t0 and relative time calculation
+	fileTs := manifest.ParseTimestampFromFilename(fileEvent.Filename)
+	if fileTs == 0 {
+		// If we can't parse timestamp, skip this segment
+		return
+	}
+
+	// Pass absolute timestamp; OnVideoSegment will set t0 and calculate relative time
+	// durationMs remains 0 to indicate full length (end_ms will equal start_ms)
+	pm.manifest.OnVideoSegment(
+		fileEvent.MeetingID,
+		fileEvent.Filename,
+		fileTs, // Pass absolute timestamp, will be converted to relative in OnVideoSegment
+		0,
+		trackType == manifest.VideoTrackShare,
+		userID,
+	)
+}
+
+func parseVideoFilename(filename string) (uint64, manifest.VideoTrackType, bool) {
+	userIDStr, rest, _ := strings.Cut(filename, "_")
+	userID, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil || userIDStr == "" {
+		return 0, manifest.VideoTrackUser, false
+	}
+	if strings.HasPrefix(rest, "share_") {
+		return userID, manifest.VideoTrackShare, true
+	}
+	if strings.HasPrefix(rest, "cam_") || strings.HasPrefix(rest, "user_") {
+		return userID, manifest.VideoTrackUser, true
+	}
+	return 0, manifest.VideoTrackUser, false
 }

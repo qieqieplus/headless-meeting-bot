@@ -107,7 +107,7 @@ func (s *WebSocketServer) sendUserSnapshot(conn *websocket.Conn, meetingID strin
 
 	now := time.Now().UnixMilli()
 	for _, user := range users {
-		event := stream.NewUserEvent(meetingID, stream.UserEventSnapshot, user, now)
+		event := stream.NewUserEvent(meetingID, stream.UserEventSnapshot, user, now, 0)
 		if err := s.writeEvent(conn, event); err != nil {
 			return fmt.Errorf("failed to write snapshot event: %w", err)
 		}

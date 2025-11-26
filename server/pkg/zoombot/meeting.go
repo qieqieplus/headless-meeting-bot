@@ -173,7 +173,17 @@ func (m *MeetingInstance) joinMeeting() error {
 	}
 
 	if m.config.EnableAudio {
-		if err := meeting.SetAudioCallback(); err != nil {
+		bitrate := m.config.AudioBitrate
+		if bitrate <= 0 {
+			bitrate = 128 // Default bitrate
+		}
+		audioConfig := &native.AudioConfig{
+			SampleRate:  32000, // Default, could be configurable if needed
+			Channels:   1,     // Default
+			Encoding:   m.config.AudioEncoding,
+			BitrateKbps: bitrate,
+		}
+		if err := meeting.SetAudioCallback(audioConfig); err != nil {
 			meeting.Destroy()
 			sdk.Destroy()
 			return fmt.Errorf("failed to set audio callback: %w", err)

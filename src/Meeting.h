@@ -4,8 +4,8 @@
 #include <memory>
 #include <string>
 
-#include "MediaController.h"
 #include "MeetingConfig.h"
+#include "controllers/Media.h"
 
 // SDK interfaces needed by implementation
 #include "meeting_service_components/meeting_audio_interface.h"
@@ -32,19 +32,21 @@ struct UserStatusEvent;
 
 class Meeting {
  private:
+  // Configuration
   MeetingConfig config_;
 
-  // Service references (injected instead of obtained from singleton)
+  // Service dependencies (injected, not owned)
   ZOOMSDK::IMeetingService* meeting_service_;
   ZOOMSDK::ISettingService* setting_service_;
 
+  // State
   bool is_joined_;
 
-  // Media controller (encapsulates all audio/video handling)
+  // Controllers (owned)
   std::unique_ptr<MediaController> media_controller_;
   std::unique_ptr<UserController> user_controller_;
 
-  // Event object ownership
+  // Event handlers (owned)
   std::unique_ptr<MeetingReminderEvent> reminder_event_;
   std::unique_ptr<MeetingServiceEvent> meeting_service_event_;
 

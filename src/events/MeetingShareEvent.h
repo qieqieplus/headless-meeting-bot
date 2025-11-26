@@ -1,16 +1,12 @@
 #pragma once
 
-#include <functional>
-
 #include "meeting_service_components/meeting_sharing_interface.h"
 
-class MeetingShareEvent : public ZOOMSDK::IMeetingShareCtrlEvent {
-  std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_start_;
-  std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_end_;
+class IUserEventSink;
 
+class MeetingShareEvent : public ZOOMSDK::IMeetingShareCtrlEvent {
  public:
-  MeetingShareEvent(std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_start,
-                    std::function<void(const ZOOMSDK::ZoomSDKSharingSourceInfo&)> on_share_end);
+  explicit MeetingShareEvent(IUserEventSink& sink);
 
   // IMeetingShareCtrlEvent implementation
   void onSharingStatus(ZOOMSDK::ZoomSDKSharingSourceInfo share_info) override;
@@ -24,4 +20,7 @@ class MeetingShareEvent : public ZOOMSDK::IMeetingShareCtrlEvent {
   void onVideoFileSharePlayError(ZOOMSDK::ZoomSDKVideoFileSharePlayError error) override;
   void onOptimizingShareForVideoClipStatusChanged(
       ZOOMSDK::ZoomSDKSharingSourceInfo share_info) override;
+
+ private:
+  IUserEventSink& sink_;
 };

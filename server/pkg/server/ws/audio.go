@@ -75,6 +75,7 @@ func (c *AudioClient) Process(config *ConnectionConfig) {
 	formatMsg, err := CreateAudioFormatMessage(
 		c.config.AudioSampleRate,
 		c.config.AudioChannels,
+		c.config.AudioEncoding,
 	)
 	if err == nil {
 		c.sendChan <- formatMsg
@@ -106,11 +107,6 @@ func (c *AudioClient) writePump() {
 		c.Stop()
 	}()
 
-	userBuffers := make(map[uint64]map[stream.AudioType][]byte)
-
-	ticker := time.NewTicker(c.config.WebSocket.AudioFlushInterval)
-	defer ticker.Stop()
-
 	pingTicker := time.NewTicker(c.config.WebSocket.PingInterval)
 	defer pingTicker.Stop()
 
@@ -130,34 +126,33 @@ func (c *AudioClient) writePump() {
 					return
 				}
 			case *stream.AudioEvent:
-				// Accumulate binary audio frame for this user and type
-				if userBuffers[msg.UserID] == nil {
-					userBuffers[msg.UserID] = make(map[stream.AudioType][]byte)
+				// Format: [64 bytes: filename bytes (UTF-8, NUL-padded)][audio data]
+				filenameBytes := []byte(msg.Filename)
+				if len(filenameBytes) > BinaryHeaderSize {
+					log.Errorf("Filename too long for audio segment (max %d): %s", BinaryHeaderSize, msg.Filename)
+					msg.Release()
+					continue
 				}
-				userBuffers[msg.UserID][msg.Type] = append(userBuffers[msg.UserID][msg.Type], msg.Data...)
-				msg.Release()
-			}
 
-		case <-ticker.C:
-			// Flush all accumulated data per user and type
-			for userID, typeMap := range userBuffers {
-				for t, buf := range typeMap {
-					if len(buf) == 0 {
-						continue
-					}
-					frame := &stream.AudioEvent{
-						UserID: userID,
-						Type:   t,
-						Data:   buf,
-					}
-					out := frame.Encode()
-					c.conn.SetWriteDeadline(time.Now().Add(c.config.WebSocket.WriteTimeout))
-					if err := c.conn.WriteMessage(websocket.BinaryMessage, out); err != nil {
-						log.Errorf("Error writing audio to WebSocket: %v", err)
-						return
-					}
-					userBuffers[userID][t] = userBuffers[userID][t][:0]
+				totalLen := BinaryHeaderSize + len(msg.Data)
+				buf := make([]byte, totalLen)
+
+				// Write fixed-length filename header (NUL-padded)
+				copy(buf[:BinaryHeaderSize], filenameBytes)
+
+				// Write audio data
+				copy(buf[BinaryHeaderSize:], msg.Data)
+
+				// Send as single binary message
+				c.conn.SetWriteDeadline(time.Now().Add(c.config.WebSocket.WriteTimeout))
+				if err := c.conn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+					log.Errorf("Error writing audio to WebSocket: %v", err)
+					msg.Release()
+					return
 				}
+
+				// Return buffer to pool
+				msg.Release()
 			}
 
 		case <-pingTicker.C:

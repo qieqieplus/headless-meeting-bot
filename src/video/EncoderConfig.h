@@ -3,9 +3,9 @@
 #include <string>
 
 enum class GOPSize : int {
-  kLow = 60,
-  kMedium = 120,
-  kHigh = 480,
+  kLow = 120,
+  kMedium = 240,
+  kHigh = 960,
 };
 
 enum class BitRate : int {

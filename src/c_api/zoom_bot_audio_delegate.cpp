@@ -3,9 +3,9 @@
 #include <utility>
 #include <vector>
 
-#include "MediaConfig.h"
-#include "MediaController.h"
-#include "UserController.h"
+#include "controllers/AudioConfig.h"
+#include "controllers/Media.h"
+#include "controllers/User.h"
 #include "util/Checks.h"
 
 void AudioVADProcessor::AccumulateAudioSamples(AudioBuffer& buffer, const int16_t* pcm_samples,
@@ -29,8 +29,8 @@ vad::ActiveSpeakerDetector& AudioVADProcessor::GetOrCreateDetector(uint32_t user
     return detector_it->second;
   }
 
-  vad::ActiveSpeakerDetector::AudioConfig audio_config = {.frame_duration_ms = 25,
-                                                          .sample_rate = 32000};
+  vad::ActiveSpeakerDetector::AudioConfig audio_config = {.sample_rate = 32000,
+                                                          .frame_duration_ms = 25};
 
   vad::VoiceActivityDetector::Config vad_config;
 
@@ -98,14 +98,19 @@ void ZoomBotAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data
 
   if (buffer && length > 0) {
     auto* pcmData = reinterpret_cast<const uint8_t*>(buffer);
-    media_controller_->DispatchAudio(pcmData, length, sampleRate, channels, ZOOM_AUDIO_TYPE_MIXED,
-                                     0, timestamp);
+    media_controller_->PushAudioEncoded(pcmData, length, sampleRate, channels,
+                                        ZOOM_AUDIO_TYPE_MIXED, 0, timestamp);
   }
 }
 
 void ZoomBotAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data,
                                                                uint32_t user_id) {
   if (!data) return;
+
+  // Filter out the bot's own audio - even though we're muted, we still receive our own stream
+  if (user_id == user_controller_->GetBotUserId()) {
+    return;
+  }
 
   char* buffer = data->GetBuffer();
   unsigned int length = data->GetBufferLen();
@@ -117,8 +122,8 @@ void ZoomBotAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
 
   auto* pcmData = reinterpret_cast<const uint8_t*>(buffer);
 
-  media_controller_->DispatchAudio(pcmData, length, sampleRate, channels, ZOOM_AUDIO_TYPE_ONE_WAY,
-                                   user_id, timestamp);
+  media_controller_->PushAudioEncoded(pcmData, length, sampleRate, channels,
+                                      ZOOM_AUDIO_TYPE_ONE_WAY, user_id, timestamp);
 
   // Use VAD-based detection since Zoom's onUserActiveAudioChange callback is unreliable
   VADResult result = vad_processor_.ProcessVAD(pcmData, length, sampleRate, channels, user_id);
@@ -148,8 +153,8 @@ void ZoomBotAudioRawDataDelegate::onShareAudioRawDataReceived(AudioRawData* data
 
   if (buffer && length > 0) {
     auto* pcmData = reinterpret_cast<const uint8_t*>(buffer);
-    media_controller_->PushAudioPCM(StreamKind::kShare, pcmData, length, sampleRate, channels,
-                                    timestamp);
+    media_controller_->PushAudioToHlsPipelines(StreamKind::kShare, pcmData, length, sampleRate,
+                                               channels, timestamp);
   }
 }
 

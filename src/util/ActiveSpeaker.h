@@ -166,7 +166,7 @@ inline bool VoiceActivityDetector::ProcessFrame(AudioFrame frame) {
   float zcr_rate = 0.0f;
   detail::ExtractFeatures(frame, last_sample_, config_.pre_emphasis_coeff, config_.zcr_epsilon,
                           energy, zcr_rate);
-  std::cout << "energy: " << energy << ", zcr_rate: " << zcr_rate << std::endl;
+  // std::cout << "energy: " << energy << ", zcr_rate: " << zcr_rate << std::endl;
 
   // 2. Make a preliminary decision for the current frame with hysteresis.
   const bool onset_candidate =

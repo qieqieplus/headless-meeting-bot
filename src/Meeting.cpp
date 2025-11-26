@@ -1,6 +1,6 @@
 #include "Meeting.h"
 
-#include "UserController.h"
+#include "controllers/User.h"
 #include "util/Checks.h"
 #include "util/Logger.h"
 
@@ -13,13 +13,15 @@ Meeting::Meeting(const MeetingConfig& config, IMeetingService* meeting_service,
       setting_service_(setting_service),
       is_joined_(false),
       media_controller_(nullptr),
-      user_controller_(nullptr) {
+      user_controller_(nullptr),
+      reminder_event_(nullptr),
+      meeting_service_event_(nullptr) {
   if (!meeting_service_ || !setting_service_) {
     Logger::GetInstance().Error("Services must be provided to create a Meeting");
     return;
   }
 
-  media_controller_ = std::make_unique<MediaController>(config_.MeetingId());
+  media_controller_ = std::make_unique<MediaController>();
   user_controller_ = std::make_unique<UserController>(meeting_service_);
 
   ASSERT_NOT_NULL(media_controller_.get());
@@ -53,15 +55,15 @@ Meeting& Meeting::operator=(Meeting&& other) noexcept {
       Leave();
     }
 
-    // Move assign all members
+    // Move assign all members (in declaration order)
     config_ = std::move(other.config_);
-    is_joined_ = other.is_joined_;
     meeting_service_ = other.meeting_service_;
     setting_service_ = other.setting_service_;
-    reminder_event_ = std::move(other.reminder_event_);
-    meeting_service_event_ = std::move(other.meeting_service_event_);
+    is_joined_ = other.is_joined_;
     media_controller_ = std::move(other.media_controller_);
     user_controller_ = std::move(other.user_controller_);
+    reminder_event_ = std::move(other.reminder_event_);
+    meeting_service_event_ = std::move(other.meeting_service_event_);
 
     // Reset the moved-from object
     other.is_joined_ = false;
@@ -92,6 +94,7 @@ Meeting::~Meeting() noexcept {
 SDKError Meeting::SetupMeetingEvents() {
   std::function<void()> on_join = [this]() {
     is_joined_ = true;
+    user_controller_->InitializeState();
     MuteMyself();
 
     auto* reminder_controller = meeting_service_->GetMeetingReminderController();
@@ -104,8 +107,6 @@ SDKError Meeting::SetupMeetingEvents() {
       user_controller_->SetOnVideoStatusChanged([this](unsigned int user_id, VideoStatus status) {
         media_controller_->UpdateCameraStatus(user_id, status == Video_ON);
       });
-      // Sync initial state so we capture streams already active at join time
-      user_controller_->InitializeState();
       // Prime MediaController with current shares and cameras
       media_controller_->UpdateShareSources(user_controller_->GetActiveShareSources());
       for (const auto& user : user_controller_->GetUsers()) {
@@ -257,8 +258,9 @@ void Meeting::MuteMyself() {
   ASSERT_NOT_NULL(audio_ctrl);
   ASSERT_NOT_NULL(video_ctrl);
 
-  if (auto* bot_user = participants_ctrl->GetMySelfUser()) {
-    audio_ctrl->MuteAudio(bot_user->GetUserID());
+  unsigned int bot_user_id = user_controller_->GetBotUserId();
+  if (bot_user_id != 0) {
+    audio_ctrl->MuteAudio(bot_user_id);
     // a workaround to join audio
     // https://devforum.zoom.us/t/cant-record-audio-with-linux-meetingsdk-after-6-3-5-6495-error-code-32/130689/10
     audio_ctrl->JoinVoip();

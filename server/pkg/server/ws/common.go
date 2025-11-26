@@ -238,12 +238,12 @@ type AudioFormatMessage struct {
 	SampleFormat string `json:"sample_format"`
 }
 
-func CreateAudioFormatMessage(sampleRate, channels int) ([]byte, error) {
+func CreateAudioFormatMessage(sampleRate, channels int, encoding string) ([]byte, error) {
 	msg := AudioFormatMessage{
 		Type:         MessageTypeAudioFormat,
 		SampleRate:   sampleRate,
 		Channels:     channels,
-		SampleFormat: "s16le",
+		SampleFormat: encoding,
 	}
 
 	return json.Marshal(msg)

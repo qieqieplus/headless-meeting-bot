@@ -9,8 +9,8 @@
 
 #include "Meeting.h"
 #include "SDKConfig.h"
-#include "UserController.h"
 #include "ZoomSDK.h"
+#include "controllers/User.h"
 #include "util/Checks.h"
 #include "util/Logger.h"
 #include "video/EncoderConfig.h"
@@ -186,8 +186,10 @@ MeetingHandle zoom_bot_meeting_create_and_join(ZoomBotHandle sdk_handle, const c
   ASSERT_NOT_NULL(media_ctrl);
   ASSERT_NOT_NULL(user_ctrl);
   if (raw_audio) {
-    auto audioDelegate = std::make_unique<ZoomBotAudioRawDataDelegate>(media_ctrl, user_ctrl);
-    media_ctrl->SetAudioDelegate(std::move(audioDelegate));
+    media_ctrl->SetAudioDelegateFactory(
+        [media_ctrl, user_ctrl]() -> SDK::IZoomSDKAudioRawDataDelegate* {
+          return new ZoomBotAudioRawDataDelegate(media_ctrl, user_ctrl);
+        });
   }
   if (raw_video) {
     media_ctrl->SetVideoDelegateFactory(
@@ -300,7 +302,8 @@ ZoomBotResult zoom_bot_meeting_set_user_status_callback(MeetingHandle meeting_ha
     out.user.audio = evt.snapshot.audio_on ? 1 : 0;
     out.user.video = evt.snapshot.video_on ? 1 : 0;
     out.user.share = evt.snapshot.sharing ? 1 : 0;
-    out.timestamp_ms = evt.timestamp_ms;
+    out.wall_ts_ms = evt.wall_ts_ms;
+    out.media_ts_ms = evt.media_ts_ms;
 
     callback(meeting_handle, &out);
   };
@@ -312,26 +315,97 @@ ZoomBotResult zoom_bot_meeting_set_user_status_callback(MeetingHandle meeting_ha
   return ZOOM_BOT_SUCCESS;
 }
 
+// Helper to build audio encoding config from API config (similar to BuildHlsConfigs for video)
+static void BuildAudioEncodingConfig(const ZoomAudioConfig* config, int& sample_rate, int& channels,
+                                     std::string& codec, int& bitrate_kbps, bool& use_encoding) {
+  // Defaults
+  sample_rate = 32000;
+  channels = 1;
+  codec = "s16le";
+  bitrate_kbps = 128;
+  use_encoding = false;
+
+  if (!config) {
+    return;
+  }
+
+  sample_rate = config->sample_rate;
+  channels = config->channels;
+
+  // Use enum-based encoding selection
+  switch (config->encoding) {
+    case ZOOM_AUDIO_ENCODING_AAC:
+      codec = "aac";
+      use_encoding = true;
+      break;
+    case ZOOM_AUDIO_ENCODING_MP3:
+      codec = "mp3";
+      use_encoding = true;
+      break;
+    case ZOOM_AUDIO_ENCODING_S16LE:
+    default:
+      codec = "s16le";
+      use_encoding = false;
+      break;
+  }
+
+  if (use_encoding && config->bitrate_kbps > 0) {
+    bitrate_kbps = config->bitrate_kbps;
+  }
+}
+
 ZoomBotResult zoom_bot_meeting_set_audio_callback(MeetingHandle meeting_handle,
-                                                  OnAudioDataReceivedCallback callback) {
+                                                  OnAudioDataReceivedCallback callback,
+                                                  const ZoomAudioConfig* config) {
   Meeting* meeting = Impl::GetMeetingFromHandle(meeting_handle);
   if (!meeting) return ZOOM_BOT_ERROR;
 
-  auto& media_config = meeting->GetMediaController()->GetConfig();
+  Logger::GetInstance().Info("Setting audio callback");
 
-  if (callback) {
-    media_config.SetAudioCallback(
-        [callback, meeting_handle](const uint8_t* pcmData, size_t pcmLength, uint32_t sampleRate,
-                                   uint32_t channels, int audioType, uint32_t userId,
-                                   uint64_t timestampMs) {
-          callback(meeting_handle, reinterpret_cast<const void*>(pcmData),
-                   static_cast<int>(pcmLength), audioType, userId);
-        });
-    Logger::GetInstance().Info("Audio callback set successfully");
-  } else {
-    media_config.ClearAudioCallback();
+  auto& audio_config_ctrl = meeting->GetMediaController()->GetAudioConfig();
+
+  if (!callback) {
+    audio_config_ctrl.ClearAudioCallback();
     Logger::GetInstance().Info("Audio callback removed");
+    return ZOOM_BOT_SUCCESS;
   }
+
+  // Build audio config
+  int sample_rate, channels, bitrate_kbps;
+  std::string codec;
+  bool use_encoding;
+  BuildAudioEncodingConfig(config, sample_rate, channels, codec, bitrate_kbps, use_encoding);
+
+  // Create unified callback that handles both PCM and encoded audio
+  AudioConfig::AudioCallback cb =
+      [callback, meeting_handle](const uint8_t* data, size_t size, const char* format,
+                                 uint32_t sample_rate, uint32_t channels, int audio_type,
+                                 uint32_t user_id, uint64_t timestamp_ms, const char* filename) {
+        callback(meeting_handle, reinterpret_cast<const void*>(data), static_cast<int>(size),
+                 audio_type, user_id, filename);
+      };
+
+  if (use_encoding) {
+    // Encoded audio (MP3/AAC)
+    if (codec != "aac" && codec != "mp3") {
+      Logger::GetInstance().Error("Unsupported audio codec: " + codec);
+      return ZOOM_BOT_ERROR;
+    }
+
+    AudioConfig::AudioEncodingConfig audio_config;
+    audio_config.sample_rate = sample_rate;
+    audio_config.channels = channels;
+    audio_config.codec = codec;
+    audio_config.bitrate_kbps = bitrate_kbps;
+
+    audio_config_ctrl.SetAudioCallback(cb, &audio_config);
+    Logger::GetInstance().Info("Audio encoding callback set successfully");
+  } else {
+    // Raw PCM audio
+    audio_config_ctrl.SetAudioCallback(cb, nullptr);
+    Logger::GetInstance().Info("Audio callback set successfully");
+  }
+
   return ZOOM_BOT_SUCCESS;
 }
 
@@ -348,15 +422,15 @@ ZoomBotResult zoom_bot_meeting_set_hls_video_callback(MeetingHandle meeting_hand
   HlsMuxerConfig muxer_config;
   BuildHlsConfigs(config, video_config, audio_config, muxer_config);
 
-  auto& media_config = meeting->GetMediaController()->GetConfig();
+  auto& video_config_ctrl = meeting->GetMediaController()->GetVideoConfig();
 
   if (!callback) {
-    media_config.ClearHlsMediaParams();
+    video_config_ctrl.ClearHlsMediaParams();
     Logger::GetInstance().Info("HLS video callback removed");
     return ZOOM_BOT_SUCCESS;
   }
 
-  MediaConfig::HlsFileCallback cb = [meeting_handle, callback](const char* filename,
+  VideoConfig::HlsFileCallback cb = [meeting_handle, callback](const char* filename,
                                                                const uint8_t* data, size_t size,
                                                                int is_playlist, uint64_t sequence) {
     if (callback) {
@@ -364,7 +438,7 @@ ZoomBotResult zoom_bot_meeting_set_hls_video_callback(MeetingHandle meeting_hand
     }
   };
 
-  media_config.SetHlsMediaCallback(video_config, audio_config, muxer_config, cb);
+  video_config_ctrl.SetHlsMediaCallback(video_config, audio_config, muxer_config, cb);
   Logger::GetInstance().Info("HLS video callback set successfully");
 
   return ZOOM_BOT_SUCCESS;

@@ -1,21 +1,25 @@
 #include "AvioMemorySink.h"
 
 #include <algorithm>
-#include <cstring>
+#include <string_view>
 
 #include "util/Logger.h"
 
 namespace {
 constexpr int kAvioBufferSize = 4096;
 constexpr size_t kFileReserveSize = 1 * 1024 * 1024;  // 1 MB
+constexpr std::string_view kTmpSuffix = ".m3u8.tmp";
+constexpr std::string_view kM3u8Suffix = ".m3u8";
+constexpr std::string_view kM4sSuffix = ".m4s";
+constexpr std::string_view kEndlistTag = "#EXT-X-ENDLIST";
 }  // namespace
 
 AvioMemorySink::AvioMemorySink() = default;
 AvioMemorySink::~AvioMemorySink() = default;
 
 void AvioMemorySink::SetFileCallback(const HlsFileCallback& cb) {
-  std::lock_guard<std::mutex> Lock(mtx_);
-  fileCallback_ = std::move(cb);
+  std::lock_guard<std::mutex> lock(mtx_);
+  fileCallback_ = cb;
 }
 
 void AvioMemorySink::InstallIoCallbacks(AVFormatContext* fmt_ctx) {
@@ -45,26 +49,30 @@ int AvioMemorySink::IoCloseCallback(AVFormatContext* s, AVIOContext* pb) {
 }
 
 int AvioMemorySink::WritePacket(void* opaque, uint8_t* buf, int buf_size) {
-  if (!opaque || !buf || buf_size < 0) {
+  if (!opaque || !buf || buf_size <= 0) {
     return AVERROR(EINVAL);
   }
-  auto* fb = static_cast<FileBuffer*>(opaque);
 
-  size_t write_pos = fb->position;
-  size_t required = write_pos + static_cast<size_t>(buf_size);
-  if (required > fb->data.size()) {
-    fb->data.resize(required);
+  auto* fb = static_cast<FileBuffer*>(opaque);
+  const size_t new_size = fb->position + static_cast<size_t>(buf_size);
+
+  if (new_size > fb->data.size()) {
+    fb->data.resize(new_size);
   }
-  std::memcpy(fb->data.data() + write_pos, buf, buf_size);
-  fb->position += static_cast<size_t>(buf_size);
+
+  // Modern C++: use std::copy instead of memcpy
+  std::copy(buf, buf + buf_size, fb->data.begin() + fb->position);
+  fb->position = new_size;
+
   return buf_size;
 }
 
 int64_t AvioMemorySink::Seek(void* opaque, int64_t offset, int whence) {
-  auto* fb = static_cast<FileBuffer*>(opaque);
-  if (!fb) {
+  if (!opaque) {
     return AVERROR(EINVAL);
   }
+
+  auto* fb = static_cast<FileBuffer*>(opaque);
 
   if (whence == AVSEEK_SIZE) {
     return static_cast<int64_t>(fb->data.size());
@@ -88,13 +96,15 @@ int64_t AvioMemorySink::Seek(void* opaque, int64_t offset, int whence) {
   if (new_pos < 0) {
     return AVERROR(EINVAL);
   }
+
   fb->position = static_cast<size_t>(new_pos);
-  // Optionally grow buffer when seeking forward beyond end; writer will fill
-  // later
+
+  // Grow buffer if seeking beyond current size
   if (fb->position > fb->data.size()) {
     fb->data.resize(fb->position);
   }
-  return static_cast<int64_t>(fb->position);
+
+  return new_pos;
 }
 
 int AvioMemorySink::OpenFile(AVFormatContext* s, AVIOContext** pb, const char* url, int flags) {
@@ -102,21 +112,15 @@ int AvioMemorySink::OpenFile(AVFormatContext* s, AVIOContext** pb, const char* u
     return AVERROR(EINVAL);
   }
 
-  std::string filename(url);
-  // Strip any path prefix; keep only the basename
-  size_t last_slash = filename.find_last_of("/\\");
-  if (last_slash != std::string::npos) {
-    filename = filename.substr(last_slash + 1);
-  }
-
   auto fb = std::make_shared<FileBuffer>();
-  fb->filename = filename;
-  fb->data.reserve(kFileReserveSize);  // 1MB initial reserve
+  fb->filename = url;
+  fb->data.reserve(kFileReserveSize);
   fb->position = 0;
 
   // Assign sequence number for segment files
-  if (filename.find(".m4s") != std::string::npos) {
-    std::lock_guard<std::mutex> Lock(mtx_);
+  const std::string_view filename_view(url);
+  if (filename_view.find(kM4sSuffix) != std::string_view::npos) {
+    std::lock_guard<std::mutex> lock(mtx_);
     fb->sequence = ++segmentSequence_;
   }
 
@@ -135,7 +139,7 @@ int AvioMemorySink::OpenFile(AVFormatContext* s, AVIOContext** pb, const char* u
   avio_ctx->seekable = AVIO_SEEKABLE_NORMAL;
 
   {
-    std::lock_guard<std::mutex> Lock(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     activeBuffers_[avio_ctx] = fb;
   }
 
@@ -151,7 +155,7 @@ int AvioMemorySink::CloseFile(AVFormatContext* s, AVIOContext* pb) {
   std::shared_ptr<FileBuffer> fb;
   HlsFileCallback cb;
   {
-    std::lock_guard<std::mutex> Lock(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     auto it = activeBuffers_.find(pb);
     if (it != activeBuffers_.end()) {
       fb = it->second;
@@ -166,27 +170,18 @@ int AvioMemorySink::CloseFile(AVFormatContext* s, AVIOContext* pb) {
   // Free AVIO context (also frees its internal buffer)
   avio_context_free(&pb);
 
-  // Invoke callback if we have a valid buffer
+  // Process and callback with file data
   if (fb && cb && !fb->data.empty()) {
-    const std::string tmp_suffix = ".m3u8.tmp";
-    const std::string final_suffix = ".m3u8";
-    bool is_playlist = (fb->filename.find(final_suffix) != std::string::npos);
-    std::string out_name = fb->filename;
-    // Normalize playlist temp name to final name: *.m3u8.tmp -> *.m3u8
-    if (is_playlist) {
-      if (out_name.size() > tmp_suffix.size() &&
-          out_name.rfind(tmp_suffix) == out_name.length() - tmp_suffix.length()) {
-        out_name.replace(out_name.length() - tmp_suffix.length(), tmp_suffix.length(),
-                         final_suffix);
-      }
-    }
-    cb(out_name.c_str(), fb->data.data(), fb->data.size(), is_playlist ? 1 : 0, fb->sequence);
+    const std::string_view filename_view(fb->filename);
+    const bool is_playlist = filename_view.find(kM3u8Suffix) != std::string_view::npos;
 
-    // Cache last playlist snapshot for potential ENDLIST emission
+    std::string normalized_name = NormalizePlaylistFilename(fb->filename);
+
     if (is_playlist) {
-      std::lock_guard<std::mutex> Lock(mtx_);
-      lastPlaylistName_ = out_name;
-      lastPlaylistData_.assign(fb->data.begin(), fb->data.end());
+      ProcessPlaylistFile(normalized_name, fb->data, fb->sequence, cb);
+    } else {
+      // For non-playlist files (segments), send full content
+      cb(normalized_name.c_str(), fb->data.data(), fb->data.size(), 0, fb->sequence);
     }
   }
 
@@ -198,23 +193,51 @@ void AvioMemorySink::EmitEndlistIfMissing() {
   std::string name;
   std::vector<uint8_t> data;
   {
-    std::lock_guard<std::mutex> Lock(mtx_);
+    std::lock_guard<std::mutex> lock(mtx_);
     cb = fileCallback_;
     name = lastPlaylistName_;
     data = lastPlaylistData_;
   }
+
   if (!cb || name.empty() || data.empty()) {
     return;
   }
+
   // Check if ENDLIST already present
-  static const char* kEndlist = "#EXT-X-ENDLIST";
-  const std::string snapshot(reinterpret_cast<const char*>(data.data()), data.size());
-  if (snapshot.find(kEndlist) != std::string::npos) {
+  const std::string_view snapshot(reinterpret_cast<const char*>(data.data()), data.size());
+  if (snapshot.find(kEndlistTag) != std::string_view::npos) {
     return;
   }
+
   // Append ENDLIST with trailing newline
-  const char* suffix = "\n#EXT-X-ENDLIST\n";
+  constexpr std::string_view endlist_suffix = "\n#EXT-X-ENDLIST\n";
   std::vector<uint8_t> with_endlist = data;
-  with_endlist.insert(with_endlist.end(), suffix, suffix + std::strlen(suffix));
-  cb(name.c_str(), with_endlist.data(), with_endlist.size(), /*is_playlist=*/1, /*sequence=*/0);
+  with_endlist.insert(with_endlist.end(), endlist_suffix.begin(), endlist_suffix.end());
+
+  cb(name.c_str(), with_endlist.data(), with_endlist.size(), 1, 0);
+}
+
+std::string AvioMemorySink::NormalizePlaylistFilename(const std::string& filename) const {
+  std::string_view view(filename);
+
+  // Normalize playlist temp name to final name: *.m3u8.tmp -> *.m3u8
+  if (view.size() > kTmpSuffix.size() &&
+      view.substr(view.size() - kTmpSuffix.size()) == kTmpSuffix) {
+    return std::string(view.substr(0, view.size() - kTmpSuffix.size())) + std::string(kM3u8Suffix);
+  }
+
+  return filename;
+}
+
+void AvioMemorySink::ProcessPlaylistFile(const std::string& filename,
+                                         const std::vector<uint8_t>& data, uint64_t sequence,
+                                         const HlsFileCallback& callback) {
+  // Update cache under lock BEFORE calling callback to prevent deadlock
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    lastPlaylistName_ = filename;
+    lastPlaylistData_ = data;
+  }
+
+  callback(filename.c_str(), data.data(), data.size(), 1, sequence);
 }

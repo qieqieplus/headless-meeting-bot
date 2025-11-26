@@ -34,9 +34,12 @@ func (m *MeetingInstance) HandleStatusChange(status MeetingStatus, detail int) {
 			log.Infof("Meeting %s ended, initiating cleanup", m.meetingID)
 			_ = m.Stop()
 		}()
+	case StatusDisconnecting:
+		// Meeting is disconnecting, prepare for cleanup
+		log.Infof("Meeting %s is disconnecting", m.meetingID)
 	default:
 		// clear failure state on recovery
-		if status == StatusInMeeting || status == StatusConnecting {
+		if status == StatusInMeeting || status == StatusConnecting || status == StatusInWaitingRoom {
 			m.lastError = nil
 		}
 	}
@@ -96,15 +99,16 @@ func (m *MeetingInstance) HandleUserStatusEvent(event *UserStatusEvent) {
 	m.usersMu.Unlock()
 
 	if m.eventsBus != nil {
-		evt := stream.NewUserEvent(m.meetingID, eventType, userInfo, int64(event.Timestamp))
+		evt := stream.NewUserEvent(m.meetingID, eventType, userInfo, int64(event.WallTs), int64(event.MediaTs))
 		m.eventsBus.Publish(m.meetingID, evt)
 	}
 }
 
 // OnAudio implements native.EventSink
-func (m *MeetingInstance) OnAudio(data []byte, audioType int, nodeID uint64) {
+func (m *MeetingInstance) OnAudio(data []byte, audioType int, nodeID uint64, filename string) {
 	// Copy C memory into pooled Go buffer
 	frame := stream.NewAudioEvent(stream.AudioType(audioType), nodeID, data)
+	frame.Filename = filename
 
 	m.statisticsMu.Lock()
 	m.statistics.AudioFramesReceived++
@@ -138,7 +142,8 @@ func (m *MeetingInstance) OnUserStatusEvent(event *native.UserStatusEvent) {
 		Audio:     event.Audio,
 		Video:     event.Video,
 		Share:     event.Share,
-		Timestamp: event.Timestamp,
+		WallTs:    event.WallTs,
+		MediaTs:   event.MediaTs,
 	}
 
 	m.HandleUserStatusEvent(converted)

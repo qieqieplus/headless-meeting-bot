@@ -43,8 +43,9 @@ type Event struct {
 	MeetingID string `json:"meeting_id"`
 
 	// Common fields
-	Type EventType `json:"type"`
-	TS   int64     `json:"ts"`
+	Type    EventType `json:"type"`
+	WallTs  int64     `json:"wallTs"`            // Absolute unix epoch timestamp (ms)
+	MediaTs int64     `json:"mediaTs,omitempty"` // Media timeline timestamp (ms, may be negative)
 
 	// Meeting status fields (when Type == EventTypeMeetingStatus)
 	Status string `json:"status,omitempty"`
@@ -53,32 +54,29 @@ type Event struct {
 	// User event fields (when Type == EventTypeUserEvent)
 	Event UserEventType `json:"event,omitempty"`
 	User  UserInfo      `json:"user,omitempty"`
-
-	// Server-side timestamp for internal metrics; not serialized.
-	createdAt time.Time `json:"-"`
 }
 
 // NewMeetingStatusEvent creates a new meeting status event
 func NewMeetingStatusEvent(meetingID, status string, detail int) *Event {
+	wallTs := time.Now().UnixMilli()
 	return &Event{
 		MeetingID: meetingID,
 		Type:      EventTypeMeetingStatus,
 		Status:    status,
 		Detail:    detail,
-		TS:        time.Now().UnixMilli(),
-		createdAt: time.Now(),
+		WallTs:    wallTs,
 	}
 }
 
-// NewUserEvent creates a new user event
-func NewUserEvent(meetingID string, eventType UserEventType, user UserInfo, timestamp int64) *Event {
+// NewUserEvent creates a new user event with wall timestamp and optional media timeline timestamp
+func NewUserEvent(meetingID string, eventType UserEventType, user UserInfo, wallTs int64, mediaTs int64) *Event {
 	return &Event{
 		MeetingID: meetingID,
 		Type:      EventTypeUserEvent,
 		Event:     eventType,
 		User:      user,
-		TS:        timestamp,
-		createdAt: time.Now(),
+		WallTs:    wallTs,
+		MediaTs:   mediaTs,
 	}
 }
 
