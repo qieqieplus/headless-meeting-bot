@@ -82,6 +82,9 @@ void MediaEncodePipeline::Stop() {
     }
   }
 
+  // Process any remaining frames in the queues that the worker didn't get to
+  DrainQueues();
+
   // Flush encoders to get any remaining buffered packets
   if (muxer_.IsReady()) {
     // Flush video encoder
@@ -96,6 +99,51 @@ void MediaEncodePipeline::Stop() {
   muxer_.Shutdown();
   videoEncoder_.Shutdown();
   audioEncoder_.Shutdown();
+}
+
+void MediaEncodePipeline::DrainQueues() {
+  std::unique_lock<std::mutex> Lock(queueMtx_);
+
+  // Drain video queue
+  while (videoSize_ > 0) {
+    VideoFrame& vf = videoPool_[videoTail_];
+
+    if (muxer_.IsReady() && muxer_.GetVideoCodecParams() != nullptr) {
+      if (EnsureVideoEncoder(vf.width, vf.height)) {
+        int64_t pts_us = static_cast<int64_t>(vf.ts) * 1000;
+        bool success = videoEncoder_.EncodeI420(vf.y.data(), vf.u.data(), vf.v.data(), vf.width,
+                                                vf.height, pts_us);
+        if (success) {
+          DrainAndWriteVideoPackets(videoEncoder_, muxer_);
+        }
+      }
+    }
+
+    // Clear frame and advance tail
+    vf = VideoFrame{};
+    videoTail_ = (videoTail_ + 1) % videoPool_.size();
+    --videoSize_;
+  }
+
+  // Drain audio queue
+  while (audioSize_ > 0) {
+    AudioFrame& af = audioPool_[audioTail_];
+
+    if (muxer_.IsReady() && muxer_.GetAudioCodecParams() != nullptr) {
+      if (EnsureAudioEncoder()) {
+        bool success = audioEncoder_.EncodePcm(af.data.data(), af.data.size(), af.sample_rate,
+                                               af.channels, af.ts);
+        if (success) {
+          DrainAndWriteAudioPackets(audioEncoder_, muxer_);
+        }
+      }
+    }
+
+    // Clear frame and advance tail
+    af = AudioFrame{};
+    audioTail_ = (audioTail_ + 1) % audioPool_.size();
+    --audioSize_;
+  }
 }
 
 void MediaEncodePipeline::PushVideoI420(const char* y, const char* u, const char* v,

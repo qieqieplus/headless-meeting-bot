@@ -28,12 +28,18 @@ func newMeetingState(meetingID string) *meetingState {
 	}
 }
 
-// ensureT0 sets t0 to the earliest media timestamp encountered.
-// This is called whenever a media file is created.
-func (s *meetingState) ensureT0(fileUnixMs int64) {
-	if s.t0UnixMs == 0 || fileUnixMs < s.t0UnixMs {
-		s.t0UnixMs = fileUnixMs
+// setT0 sets the meeting start time (t0) exactly once.
+// Subsequent calls are ignored to maintain consistency.
+// The t0 value should be provided by ProcessManager from the first event with valid timing.
+func (s *meetingState) setT0(t0UnixMs int64) {
+	if s.t0UnixMs == 0 {
+		s.t0UnixMs = t0UnixMs
 	}
+}
+
+// hasT0 returns true if the meeting start time has been set.
+func (s *meetingState) hasT0() bool {
+	return s.t0UnixMs != 0
 }
 
 func (s *meetingState) ensureAudioTrack(key audioTrackKey, format AudioFormat) *trackState {

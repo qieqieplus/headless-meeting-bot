@@ -175,8 +175,8 @@ Returns a JSON manifest describing the meeting recording structure:
 | Field | Type | Description |
 |-------|------|-------------|
 | `meeting_id` | string | Meeting identifier |
-| `t0` | integer | Meeting start time (Unix milliseconds) |
-| `duration` | integer | Total meeting duration (milliseconds) |
+| `t0_unix_ms` | integer | Meeting start time (Unix milliseconds) |
+| `duration_ms` | integer | Total meeting duration (milliseconds) |
 | `audio` | array | Audio tracks (see AudioTrack structure) |
 | `video` | array | Video tracks (see VideoTrack structure) |
 | `events` | array | Timeline events (see ManifestEvent structure) |
@@ -186,27 +186,25 @@ Returns a JSON manifest describing the meeting recording structure:
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | string | Track type: `"mixed"`, `"user"`, or `"share"` |
-| `user_id` | string | User ID (0 for mixed audio) |
-| `path` | string | Relative path to audio file |
-| `timeline` | array | Timing segments (see TimelineSegment) |
-| `format` | object | Audio format (sample_rate, channels, encoding) |
+| `user_id` | integer | User ID (uint64, 0 for mixed audio) |
+| `format` | object | Audio format (encoding, sample_rate, channels) |
+| `segments` | array | Media segments (see MediaSegment) |
 
 **VideoTrack Structure:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | string | Track type: `"user"` or `"share"` |
-| `user_id` | string | User ID |
-| `path` | string | Relative path to HLS playlist (.m3u8) |
-| `timeline` | array | Timing segments (see TimelineSegment) |
+| `user_id` | integer | User ID (uint64) |
+| `segments` | array | Media segments (see MediaSegment) |
 
-**TimelineSegment Structure:**
+**MediaSegment Structure:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `start_pts` | integer | Start timestamp (milliseconds since meeting start) |
-| `duration` | integer | Segment duration (milliseconds) |
-| `offset_pts` | integer | Offset in output file (milliseconds) |
+| `path` | string | Relative path to media file |
+| `start_ms` | integer | Start timestamp (milliseconds since meeting start) |
+| `end_ms` | integer | End timestamp (milliseconds since meeting start) |
 
 **ManifestEvent Structure:**
 
@@ -215,7 +213,7 @@ Returns a JSON manifest describing the meeting recording structure:
 | `type` | string | Event type: `"meeting_status"` or `"user_event"` |
 | `event` | string | Event name (e.g., `"joined"`, `"audio_unmuted"`) |
 | `user_id` | string | User ID (optional) |
-| `ts` | integer | Timestamp (milliseconds since meeting start) |
+| `timestamp` | integer | Timestamp (milliseconds since meeting start) |
 | `wall_ts` | integer | Wall clock timestamp (Unix milliseconds) |
 
 **Filename Conventions:**
@@ -237,27 +235,29 @@ Where:
 ```json
 {
   "meeting_id": "123",
-  "t0": 1700000000000,
-  "duration": 120000,
+  "t0_unix_ms": 1700000000000,
+  "duration_ms": 120000,
   "audio": [
     {
       "type": "mixed",
-      "user_id": "0",
-      "path": "0/mixed_1700000001000.mp3",
-      "timeline": [{"start_pts": 0, "duration": 120000, "offset_pts": 0}],
-      "format": {"sample_rate": 32000, "channels": 1, "encoding": "MP3", "bitrate": 128}
+      "user_id": 0,
+      "format": {"encoding": "MP3", "sample_rate": 32000, "channels": 1},
+      "segments": [
+        {"path": "0/mixed_1700000001000.mp3", "start_ms": 0, "end_ms": 120000}
+      ]
     }
   ],
   "video": [
     {
       "type": "user",
-      "user_id": "16778243",
-      "path": "16778243/user_1700000002000.m3u8",
-      "timeline": [{"start_pts": 1000, "duration": 10000, "offset_pts": 0}]
+      "user_id": 16778243,
+      "segments": [
+        {"path": "16778243/user_1700000002000.m3u8", "start_ms": 1000, "end_ms": 11000}
+      ]
     }
   ],
   "events": [
-    {"type": "user_event", "event": "joined", "user_id": "16778243", "ts": 500, "wall_ts": 1700000000500}
+    {"type": "user_event", "event": "joined", "user_id": "16778243", "timestamp": 500, "wall_ts": 1700000000500}
   ]
 }
 ```
@@ -682,7 +682,7 @@ server/pkg/
 │   ├── events.go       # Event type definitions
 │   └── mempool.go      # Memory pooling for efficient buffer management
 ├── zoombot/            # Zoom bot integration
-│   ├── manager.go      # Multi-meeting management
+│   ├── manager.go      # Single-process meeting management (legacy)
 │   ├── meeting.go      # Individual meeting instance
 │   ├── meeting_types.go # Status and statistics types
 │   ├── meeting_handlers.go # Event handlers
@@ -693,6 +693,13 @@ server/pkg/
 │       ├── callback.go # Callback routing
 │       ├── bytes.go    # Byte utilities
 │       └── thread.go   # Thread management
+├── manifest/           # Meeting manifest tracking
+│   ├── tracker.go      # Manifest tracker implementation
+│   ├── types.go        # Manifest data structures
+│   ├── meeting_state.go # Per-meeting state management
+│   ├── track_state.go  # Audio/video track state
+│   ├── naming.go       # Filename parsing utilities
+│   └── tracker_test.go # Unit tests
 ├── server/             # HTTP/WebSocket server
 │   ├── http.go         # REST API handlers
 │   ├── router.go       # Path parameter routing
@@ -707,6 +714,17 @@ server/pkg/
 │   └── errors.go       # Configuration errors
 └── log/                # Logging utilities
     └── logger.go       # Structured logging
+```
+
+**Command Structure:**
+
+```
+server/cmd/headless-meeting-bot/
+├── main.go             # Entry point (server/worker mode selection)
+├── server.go           # Server mode initialization
+├── worker.go           # Worker mode implementation
+├── manager.go          # ProcessManager implementation
+└── streams.go          # GOB stream aggregation from workers
 ```
 
 ### Stream Bus Architecture
@@ -757,9 +775,73 @@ Audio and video WebSocket protocols share a consistent format:
 
 This unified format simplifies client implementation and provides consistent filename metadata for both streams.
 
+### Manifest Tracking System
+
+The manifest tracker builds a comprehensive timeline of all media files and events for each meeting:
+
+**Architecture:**
+
+```
+┌──────────────────────────────────────────────────┐
+│           Manifest Tracker (InMemoryTracker)     │
+│                                                  │
+│  ┌────────────────────────────────────────────┐ │
+│  │  Per-Meeting State (meetingState)          │ │
+│  │                                            │ │
+│  │  • t0UnixMs: Meeting start time            │ │
+│  │  • audioTracks: map[key]*audioTrackState   │ │
+│  │  • videoTracks: map[key]*videoTrackState   │ │
+│  │  • events: []ManifestEvent                 │ │
+│  │  • duration: Total meeting duration        │ │
+│  └────────────────────────────────────────────┘ │
+│                                                  │
+│  Input Events:                                   │
+│  • OnMeetingStart(meetingID, t0)                 │
+│  • OnAudioSegment(meetingID, filename, ...)      │
+│  • OnVideoSegment(meetingID, filename, ...)      │
+│  • OnUserEvent(event)                            │
+│  • OnMeetingEnd(meetingID)                       │
+│                                                  │
+│  Output:                                         │
+│  • GetManifest(meetingID) → MeetingManifest      │
+└──────────────────────────────────────────────────┘
+```
+
+**Key Features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Timeline Tracking** | All timestamps are relative to t0 (meeting start time) |
+| **Segment Management** | Tracks start/end times for each audio/video file |
+| **Event Recording** | Captures all meeting and user events with timestamps |
+| **Automatic Closure** | Closes segments on mute/share-stop/meeting-end events |
+| **Thread Safety** | All operations are protected by mutex |
+| **Deep Copy** | GetManifest returns a snapshot, safe for concurrent use |
+
+**Track State Management:**
+
+- **Audio Tracks**: One track per (type, userID) combination
+  - Mixed audio (userID=0): Continuous stream from meeting start
+  - User audio: Segments created on unmute, closed on mute
+  - Share audio: Segments created on share start, closed on share stop
+
+- **Video Tracks**: One track per (type, userID) combination
+  - User video: Segments created on video on, closed on video off
+  - Share video: Segments created on share start, closed on share stop
+
+**Integration:**
+
+The ProcessManager integrates manifest tracking by:
+1. Calling `OnMeetingStart` when first event arrives (sets t0)
+2. Calling `OnAudioSegment` when audio files are created
+3. Calling `OnVideoSegment` when HLS playlists are created
+4. Calling `OnUserEvent` for all user events (join/leave/mute/unmute/share)
+5. Calling `OnMeetingEnd` when meeting ends (closes all open segments)
+
+
 ### Multi-Process Architecture
 
-The server uses a process-per-meeting architecture to avoid GLib context conflicts:
+The server uses a **process-per-meeting** architecture to avoid GLib context conflicts in the Zoom SDK:
 
 **Architecture Diagram:**
 
@@ -780,6 +862,10 @@ The server uses a process-per-meeting architecture to avoid GLib context conflic
 │       └────│ Audio/Video/    │          │  │
 │            │ Events Buses    │          │  │
 │            └─────────────────┘          │  │
+│                                         │  │
+│  ┌──────────────────┐                  │  │
+│  │ Manifest Tracker │◄─────────────────┘  │
+│  └──────────────────┘                     │
 └─────────────────────────────────────────┼──┘
                                           │
               ┌───────────────────────────┴───────────────┐
@@ -794,13 +880,16 @@ The server uses a process-per-meeting architecture to avoid GLib context conflic
     │ │ Instance    │ │                        │ │ Instance    │ │
     │ └─────────────┘ │                        │ └─────────────┘ │
     │                 │                        │                 │
-    │ Streams:        │                        │ Streams:        │
-    │ • Audio frames  │                        │ • Audio frames  │
-    │ • Events        │                        │ • Events        │
-    │ • HLS files     │                        │ • HLS files     │
+    │ HTTP Server:    │                        │ HTTP Server:    │
+    │ • /health       │                        │ • /health       │
+    │ • /state        │                        │ • /state        │
+    │ • /audio        │                        │ • /audio        │
+    │ • /events       │                        │ • /events       │
+    │ • /video        │                        │ • /video        │
+    │ • /shutdown     │                        │ • /shutdown     │
     └─────────────────┘                        └─────────────────┘
             │                                           │
-            └──────────HTTP Streaming (NDJSON)─────────┘
+            └──────────GOB Streaming (HTTP)────────────┘
                     (to main server buses)
 ```
 
@@ -808,10 +897,24 @@ The server uses a process-per-meeting architecture to avoid GLib context conflic
 
 | Component | Responsibility |
 |-----------|----------------|
-| Main Server | Handles API requests, manages WebSocket connections, aggregates streams |
-| Worker Processes | Isolated Zoom SDK instances, one per meeting |
-| Stream Aggregation | Workers stream data to main server via HTTP (newline-delimited JSON) |
+| Main Server | Handles API requests, manages WebSocket connections, aggregates streams, tracks manifest |
+| ProcessManager | Spawns/manages worker processes, aggregates GOB streams, maintains meeting state |
+| Worker Processes | Isolated Zoom SDK instances, one per meeting, streams data via HTTP |
+| Stream Aggregation | Workers stream GOB-encoded data to main server via HTTP endpoints |
 | Bus Distribution | Main server publishes to buses, WebSocket clients subscribe |
+| Manifest Tracker | Tracks audio/video segments and events, builds meeting manifest |
+
+**Communication Protocol:**
+
+Workers communicate with the main server using **GOB-encoded HTTP streams**:
+
+1. **Worker Startup**: ProcessManager spawns worker with unique port
+2. **Health Check**: Main server polls `/health` endpoint until worker is ready
+3. **Stream Aggregation**: Main server subscribes to worker's `/audio`, `/events`, `/video` endpoints
+4. **GOB Decoding**: Main server decodes GOB streams and publishes to buses
+5. **Manifest Tracking**: Events and file notifications update the manifest tracker
+6. **State Queries**: Main server queries `/state` endpoint for meeting status/statistics
+7. **Shutdown**: Main server calls `/shutdown` endpoint to gracefully stop worker
 
 **Benefits:**
 
@@ -819,6 +922,7 @@ The server uses a process-per-meeting architecture to avoid GLib context conflic
 - **Scalability**: Can run multiple meetings concurrently
 - **Reliability**: Failure in one meeting doesn't affect others
 - **Resource Management**: Better control over memory and CPU per meeting
+- **Clean Shutdown**: Workers can be terminated independently
 
 ### Building
 

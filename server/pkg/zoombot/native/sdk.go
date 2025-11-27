@@ -90,3 +90,5 @@ func StopLoop() {
 	C.zoom_bot_stop_loop()
 }
 
+
+

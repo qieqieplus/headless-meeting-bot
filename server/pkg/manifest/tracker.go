@@ -2,8 +2,6 @@ package manifest
 
 import (
 	"errors"
-	"regexp"
-	"strconv"
 	"sync"
 
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
@@ -18,7 +16,7 @@ type Tracker interface {
 	OnMeetingEnd(meetingID string)
 	OnUserEvent(ev *stream.Event)
 	OnAudioSegment(meetingID, filename string, trackType AudioTrackType, userID uint64)
-	OnVideoSegment(meetingID, filename string, startMediaTs, durationMs int64, isShare bool, userID uint64)
+	OnVideoSegment(meetingID, filename string, isShare bool, userID uint64)
 	GetManifest(meetingID string) (*MeetingManifest, error)
 }
 
@@ -32,21 +30,6 @@ type InMemoryTracker struct {
 	mu          sync.RWMutex
 	meetingMap  map[string]*meetingState
 	audioFormat AudioFormat
-}
-
-// ParseTimestampFromFilename extracts the Unix timestamp (ms) from media filenames.
-// Expected formats: "0_mixed_1763965414391.wav", "123_user_1763965444593.wav", "16778240_share_1763974041176.m3u8"
-func ParseTimestampFromFilename(filename string) int64 {
-	// Match pattern: underscore followed by 13 digits then file extension
-	re := regexp.MustCompile(`_(\d{13})\.(wav|mp3|aac|m3u8)$`)
-	matches := re.FindStringSubmatch(filename)
-	if len(matches) >= 2 {
-		ts, err := strconv.ParseInt(matches[1], 10, 64)
-		if err == nil {
-			return ts
-		}
-	}
-	return 0
 }
 
 // NewInMemoryTracker builds a manager with sane defaults (32kHz S16LE mono).
@@ -67,7 +50,7 @@ func NewInMemoryTracker(opts Options) *InMemoryTracker {
 }
 
 // OnMeetingStart is called when the bot joins a meeting.
-// Note: t0 is now set from the first media file, not here.
+// The t0UnixMs parameter is the authoritative meeting start time calculated by ProcessManager.
 func (m *InMemoryTracker) OnMeetingStart(meetingID string, t0UnixMs int64) {
 	if meetingID == "" {
 		return
@@ -76,8 +59,8 @@ func (m *InMemoryTracker) OnMeetingStart(meetingID string, t0UnixMs int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Just ensure the meeting state exists; t0 will be set by first media file
-	m.ensureMeetingLocked(meetingID)
+	state := m.ensureMeetingLocked(meetingID)
+	state.setT0(t0UnixMs)
 }
 
 // OnMeetingEnd finalizes open segments but keeps the manifest available for lookup.
@@ -149,14 +132,16 @@ func (m *InMemoryTracker) OnAudioSegment(meetingID, filename string, trackType A
 
 	state := m.ensureMeetingLocked(meetingID)
 
+	// T0 must be set before processing segments
+	if !state.hasT0() {
+		return
+	}
+
 	// Parse timestamp from filename
 	fileTs := ParseTimestampFromFilename(filename)
 	if fileTs == 0 {
 		return
 	}
-
-	// Set t0 from first media file
-	state.ensureT0(fileTs)
 
 	// Get or create track
 	key := audioTrackKey{Type: trackType, UserID: userID}
@@ -169,7 +154,7 @@ func (m *InMemoryTracker) OnAudioSegment(meetingID, filename string, trackType A
 // OnVideoSegment records a new video playlist file.
 // The playlist timestamp becomes the segment start, and it remains open until share_stopped or meeting end.
 // This works like OnAudioSegment - HLS playlists are continuous streams, not discrete segments.
-func (m *InMemoryTracker) OnVideoSegment(meetingID, filename string, startMediaTs, durationMs int64, isShare bool, userID uint64) {
+func (m *InMemoryTracker) OnVideoSegment(meetingID, filename string, isShare bool, userID uint64) {
 	if meetingID == "" || filename == "" {
 		return
 	}
@@ -179,14 +164,16 @@ func (m *InMemoryTracker) OnVideoSegment(meetingID, filename string, startMediaT
 
 	state := m.ensureMeetingLocked(meetingID)
 
-	// Parse timestamp from filename to set t0 if not already set
+	// T0 must be set before processing segments
+	if !state.hasT0() {
+		return
+	}
+
+	// Parse timestamp from filename
 	fileTs := ParseTimestampFromFilename(filename)
 	if fileTs == 0 {
 		return
 	}
-
-	// Set t0 from first media file
-	state.ensureT0(fileTs)
 
 	trackType := VideoTrackUser
 	if isShare {

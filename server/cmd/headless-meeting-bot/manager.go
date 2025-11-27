@@ -4,12 +4,11 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -19,7 +18,6 @@ import (
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
-	. "github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
 )
 
 const (
@@ -56,11 +54,11 @@ type WorkerProcess struct {
 	MeetingID string
 	Port      int
 	PID       int
-	Status    MeetingStatus
+	Status    zoombot.MeetingStatus
 	cmd       *exec.Cmd
 	stopChan  chan struct{}
 	stopped   bool
-	config    *MeetingConfig
+	config    *zoombot.MeetingConfig
 }
 
 // Stop terminates the worker process
@@ -146,7 +144,7 @@ func (pm *ProcessManager) JoinMeeting(meetingID, password, displayName, joinToke
 		return zoombot.ErrMeetingAlreadyExists
 	}
 
-	config := &MeetingConfig{
+	config := &zoombot.MeetingConfig{
 		MeetingID:   meetingID,
 		Password:    password,
 		DisplayName: displayName,
@@ -186,15 +184,34 @@ func (pm *ProcessManager) JoinMeeting(meetingID, password, displayName, joinToke
 func (pm *ProcessManager) allocatePort() int {
 	for i := 0; i < pm.maxPort-pm.basePort; i++ {
 		candidate := pm.basePort + int(atomic.AddUint32(&pm.nextPort, 1))%(pm.maxPort-pm.basePort)
-		if _, loaded := pm.usedPorts.LoadOrStore(candidate, true); !loaded {
+		if _, loaded := pm.usedPorts.LoadOrStore(candidate, true); loaded {
+			continue
+		}
+
+		// Verify port is actually available on OS
+		if pm.isPortAvailable(candidate) {
 			return candidate
 		}
+
+		// Port unavailable, remove from our map and try next
+		pm.usedPorts.Delete(candidate)
 	}
 	return 0
 }
 
+// isPortAvailable checks if a port is actually available on the OS by attempting to bind it.
+func (pm *ProcessManager) isPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	listener.Close()
+	return true
+}
+
 // spawnWorker creates and starts a new worker process
-func (pm *ProcessManager) spawnWorker(config *MeetingConfig, port int) (*WorkerProcess, error) {
+func (pm *ProcessManager) spawnWorker(config *zoombot.MeetingConfig, port int) (*WorkerProcess, error) {
 	workerConfig := map[string]interface{}{
 		"meeting_id":   config.MeetingID,
 		"password":     config.Password,
@@ -487,41 +504,18 @@ func (pm *ProcessManager) handleManifestVideoFile(fileEvent *stream.FileEvent) {
 		return
 	}
 
-	userID, trackType, ok := parseVideoFilename(fileEvent.Filename)
-	if !ok {
+	// Use naming helper to parse video filename
+	info, err := manifest.ParseVideoFilename(fileEvent.Filename)
+	if err != nil {
+		// Not a valid video filename - skip silently
 		return
 	}
 
-	// Parse timestamp from filename - OnVideoSegment will handle t0 and relative time calculation
-	fileTs := manifest.ParseTimestampFromFilename(fileEvent.Filename)
-	if fileTs == 0 {
-		// If we can't parse timestamp, skip this segment
-		return
-	}
-
-	// Pass absolute timestamp; OnVideoSegment will set t0 and calculate relative time
-	// durationMs remains 0 to indicate full length (end_ms will equal start_ms)
+	// Pass video segment info to manifest tracker
 	pm.manifest.OnVideoSegment(
 		fileEvent.MeetingID,
 		fileEvent.Filename,
-		fileTs, // Pass absolute timestamp, will be converted to relative in OnVideoSegment
-		0,
-		trackType == manifest.VideoTrackShare,
-		userID,
+		info.Type == manifest.VideoTrackShare,
+		info.UserID,
 	)
-}
-
-func parseVideoFilename(filename string) (uint64, manifest.VideoTrackType, bool) {
-	userIDStr, rest, _ := strings.Cut(filename, "_")
-	userID, err := strconv.ParseUint(userIDStr, 10, 64)
-	if err != nil || userIDStr == "" {
-		return 0, manifest.VideoTrackUser, false
-	}
-	if strings.HasPrefix(rest, "share_") {
-		return userID, manifest.VideoTrackShare, true
-	}
-	if strings.HasPrefix(rest, "cam_") || strings.HasPrefix(rest, "user_") {
-		return userID, manifest.VideoTrackUser, true
-	}
-	return 0, manifest.VideoTrackUser, false
 }

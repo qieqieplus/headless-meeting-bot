@@ -62,6 +62,7 @@ class MediaEncodePipeline {
   void WorkerLoop();
   bool EnsureVideoEncoder(unsigned int w, unsigned int h);
   bool EnsureAudioEncoder();
+  void DrainQueues();
 
  private:
   std::thread worker_;
