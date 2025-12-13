@@ -1,0 +1,5 @@
+
+# Demo folder
+video/*
+.env
+m3u8.json

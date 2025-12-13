@@ -1,9 +1,5 @@
 #include "SDKConfig.h"
 
-SDKConfig::SDKConfig(const std::string& sdkKey,
-                     const std::string& sdkSecret,
-                     const std::string& zoomHost)
-    : m_sdkKey(sdkKey)
-    , m_sdkSecret(sdkSecret)
-    , m_zoomHost(zoomHost) {
-}
+SDKConfig::SDKConfig(const std::string& sdk_key, const std::string& sdk_secret,
+                     const std::string& zoom_host)
+    : sdk_key_(sdk_key), sdk_secret_(sdk_secret), zoom_host_(zoom_host) {}

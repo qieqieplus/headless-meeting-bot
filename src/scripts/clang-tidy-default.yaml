@@ -1,0 +1,21 @@
+---
+Checks: '-*,
+  google-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-braces-around-statements,
+  readability-redundant-string-cstr,
+  # Add modern C++ checks that often apply to .cpp files
+  modernize-loop-convert,
+  modernize-use-auto,
+  modernize-use-emplace,
+  modernize-use-equals-default,
+  modernize-use-unique-ptr,
+  readability-make-member-function-const,
+  readability-simplify-boolean-expr'
+WarningsAsErrors: ''
+HeaderFilterRegex: '^src/(video|util|events)/'
+FormatStyle: file
+CheckOptions: []
+
+

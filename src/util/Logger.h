@@ -1,174 +1,158 @@
-#ifndef HEADLESS_ZOOM_BOT_LOGGER_H
-#define HEADLESS_ZOOM_BOT_LOGGER_H
+#pragma once
 
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <sstream>
-#include <mutex>
-#include <memory>
 #include <chrono>
+#include <ctime>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
 
-namespace Util {
-
-enum class LogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARN = 2,
-    ERROR = 3,
-    SUCCESS = 4,
-    QUIET = 5
-};
+enum class LogLevel { kDebug = 0, kInfo = 1, kWarn = 2, kError = 3, kSuccess = 4, kQuiet = 5 };
 
 class Logger {
-public:
-    static Logger& getInstance() {
-        static Logger instance;
-        return instance;
+ public:
+  static Logger& GetInstance() {
+    static Logger instance;
+    return instance;
+  }
+
+  // Prevent copying
+  Logger(const Logger&) = delete;
+  Logger& operator=(const Logger&) = delete;
+
+  // Configuration methods
+  void SetLogLevel(LogLevel level) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    current_level_ = level;
+  }
+
+  void SetLogFile(const std::string& filename) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Close existing file stream
+    if (file_stream_ && file_stream_->is_open()) {
+      file_stream_->close();
     }
 
-    // Prevent copying
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
+    log_file_ = filename;
+    if (!filename.empty()) {
+      file_stream_ = std::make_unique<std::ofstream>(filename, std::ios::app);
+    }
+  }
 
-    // Configuration methods
-    void setLogLevel(LogLevel level) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_currentLevel = level;
+  void EnableConsoleOutput(bool enable) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    console_output_ = enable;
+  }
+
+  void EnableFileOutput(bool enable) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    file_output_ = enable;
+  }
+
+  // Logging methods
+  void Log(LogLevel level, const std::string& message) {
+    if (level < current_level_) {
+      return;
     }
 
-    void setLogFile(const std::string& filename) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string formatted_message = FormatMessage(level, message);
 
-        // Close existing file stream
-        if (m_fileStream && m_fileStream->is_open()) {
-            m_fileStream->close();
-        }
-
-        m_logFile = filename;
-        if (!filename.empty()) {
-            m_fileStream = std::make_unique<std::ofstream>(filename, std::ios::app);
-        }
+    if (console_output_) {
+      if (level == LogLevel::kError) {
+        std::cerr << formatted_message << std::endl;
+      } else {
+        std::cout << formatted_message << std::endl;
+      }
     }
 
-    void enableConsoleOutput(bool enable) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_consoleOutput = enable;
+    if (file_output_ && file_stream_ && file_stream_->is_open()) {
+      *file_stream_ << formatted_message << std::endl;
+    }
+  }
+
+  void Debug(const std::string& message) { Log(LogLevel::kDebug, message); }
+
+  void Info(const std::string& message) { Log(LogLevel::kInfo, message); }
+
+  void Warn(const std::string& message) { Log(LogLevel::kWarn, message); }
+
+  void Error(const std::string& message) { Log(LogLevel::kError, message); }
+
+  void Success(const std::string& message) { Log(LogLevel::kSuccess, message); }
+
+  // Utility methods
+  bool HasError(const std::string& action, bool condition, const std::string& error_message = "") {
+    if (condition) {
+      std::stringstream ss;
+      ss << "failed to " << action;
+      if (!error_message.empty()) {
+        ss << ": " << error_message;
+      }
+      Error(ss.str());
+    } else {
+      Success(action);
+    }
+    return condition;
+  }
+
+ private:
+  Logger()
+      : current_level_(LogLevel::kInfo),
+        console_output_(true),
+        file_output_(false),
+        log_file_("") {}
+
+  std::string GetTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::tm local_time{};
+    localtime_r(&time, &local_time);
+
+    std::stringstream ss;
+    ss << std::put_time(&local_time, "%Y-%m-%d %H:%M:%S") << "." << std::setfill('0')
+       << std::setw(3) << ms.count();
+    return ss.str();
+  }
+
+  std::string FormatMessage(LogLevel level, const std::string& message) {
+    std::string icon;
+    switch (level) {
+      case LogLevel::kDebug:
+        icon = "🔍";
+        break;
+      case LogLevel::kInfo:
+        icon = "⏳";
+        break;
+      case LogLevel::kWarn:
+        icon = "⚠️";
+        break;
+      case LogLevel::kError:
+        icon = "❌";
+        break;
+      case LogLevel::kSuccess:
+        icon = "✅";
+        break;
+      default:
+        icon = "";
+        break;
     }
 
-    void enableFileOutput(bool enable) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_fileOutput = enable;
-    }
+    std::stringstream ss;
+    ss << "[" << GetTimestamp() << "] " << icon << " " << message;
+    return ss.str();
+  }
 
-    // Logging methods
-    void log(LogLevel level, const std::string& message) {
-        if (level < m_currentLevel) {
-            return;
-        }
-
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::string formattedMessage = formatMessage(level, message);
-
-        if (m_consoleOutput) {
-            if (level == LogLevel::ERROR) {
-                std::cerr << formattedMessage << std::endl;
-            } else {
-                std::cout << formattedMessage << std::endl;
-            }
-        }
-
-        if (m_fileOutput && m_fileStream && m_fileStream->is_open()) {
-            *m_fileStream << formattedMessage << std::endl;
-        }
-    }
-
-    void debug(const std::string& message) {
-        log(LogLevel::DEBUG, message);
-    }
-
-    void info(const std::string& message) {
-        log(LogLevel::INFO, message);
-    }
-
-    void warn(const std::string& message) {
-        log(LogLevel::WARN, message);
-    }
-
-    void error(const std::string& message) {
-        log(LogLevel::ERROR, message);
-    }
-
-    void success(const std::string& message) {
-        log(LogLevel::SUCCESS, message);
-    }
-
-    // Utility methods
-    bool hasError(const std::string& action, bool condition, const std::string& errorMessage = "") {
-        if (condition) {
-            std::stringstream ss;
-            ss << "failed to " << action;
-            if (!errorMessage.empty()) {
-                ss << ": " << errorMessage;
-            }
-            error(ss.str());
-        } else {
-            success(action);
-        }
-        return condition;
-    }
-
-private:
-    Logger() : m_currentLevel(LogLevel::INFO), m_consoleOutput(true), m_fileOutput(false), m_logFile("") {}
-
-    std::string getTimestamp() {
-        auto now = std::chrono::system_clock::now();
-        auto time = std::chrono::system_clock::to_time_t(now);
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S")
-           << "." << std::setfill('0') << std::setw(3) << ms.count();
-        return ss.str();
-    }
-
-    std::string formatMessage(LogLevel level, const std::string& message) {
-        std::string icon;
-        switch (level) {
-            case LogLevel::DEBUG:
-                icon = "🔍";
-                break;
-            case LogLevel::INFO:
-                icon = "⏳";
-                break;
-            case LogLevel::WARN:
-                icon = "⚠️";
-                break;
-            case LogLevel::ERROR:
-                icon = "❌";
-                break;
-            case LogLevel::SUCCESS:
-                icon = "✅";
-                break;
-            default:
-                icon = "";
-                break;
-        }
-
-        std::stringstream ss;
-        ss << "[" << getTimestamp() << "] " << icon << " " << message;
-        return ss.str();
-    }
-
-    LogLevel m_currentLevel;
-    bool m_consoleOutput;
-    bool m_fileOutput;
-    std::string m_logFile;
-    std::unique_ptr<std::ofstream> m_fileStream;
-    std::mutex m_mutex;
+  LogLevel current_level_;
+  bool console_output_;
+  bool file_output_;
+  std::string log_file_;
+  std::unique_ptr<std::ofstream> file_stream_;
+  std::mutex mutex_;
 };
-
-} // namespace Logger
-
-#endif // HEADLESS_ZOOM_BOT_LOGGER_H

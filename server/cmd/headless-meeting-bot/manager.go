@@ -1,11 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,15 +14,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/qieqieplus/headless-meeting-bot/server/pkg/audio"
 	"github.com/qieqieplus/headless-meeting-bot/server/pkg/log"
-	. "github.com/qieqieplus/headless-meeting-bot/server/pkg/zoomsdk"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/manifest"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/stream"
+	"github.com/qieqieplus/headless-meeting-bot/server/pkg/zoombot"
+)
+
+const (
+	basePort            = 9000
+	maxPort             = 9999
+	workerReadyTimeout  = 10 * time.Second
+	workerStopTimeout   = 3 * time.Second
+	healthCheckTimeout  = 1 * time.Second
+	healthCheckInterval = 200 * time.Millisecond
+	stateRequestTimeout = 2 * time.Second
 )
 
 // ProcessManager manages meeting worker processes
 type ProcessManager struct {
 	workers     sync.Map // map[string]*WorkerProcess
-	audioBus    *audio.Bus
+	audioBus    *stream.AudioBus
+	eventsBus   *stream.EventBus
+	videoBus    *stream.VideoBus
 	sdkKey      string
 	sdkSecret   string
 	usedPorts   sync.Map // map[int]bool
@@ -32,6 +44,9 @@ type ProcessManager struct {
 	maxPort     int
 	workerBin   string
 	callbackURL string
+	manifest    manifest.Tracker
+	manifestMu  sync.RWMutex
+	meetingT0   map[string]int64
 }
 
 // WorkerProcess represents a running meeting worker process
@@ -39,17 +54,64 @@ type WorkerProcess struct {
 	MeetingID string
 	Port      int
 	PID       int
-	Status    MeetingStatus
-	Stats     MeetingStats
-	statsMux  sync.RWMutex
+	Status    zoombot.MeetingStatus
 	cmd       *exec.Cmd
-	cancel    context.CancelFunc
 	stopChan  chan struct{}
 	stopped   bool
-	config    *MeetingConfig
+	config    *zoombot.MeetingConfig
 }
 
-func NewProcessManager(sdkKey, sdkSecret string, audioBus *audio.Bus) (*ProcessManager, error) {
+// Stop terminates the worker process
+func (w *WorkerProcess) Stop() error {
+	if w.stopped {
+		return nil
+	}
+
+	log.Infof("Stopping worker process: %s (PID: %d)", w.MeetingID, w.PID)
+	w.Status = zoombot.StatusEnded
+	w.stopped = true
+
+	if w.cmd == nil || w.cmd.Process == nil {
+		return nil
+	}
+
+	// Try graceful HTTP shutdown first
+	client := &http.Client{Timeout: workerStopTimeout}
+	url := fmt.Sprintf("http://localhost:%d/shutdown", w.Port)
+	req, _ := http.NewRequest(http.MethodPost, url, nil)
+	_, _ = client.Do(req)
+
+	// Wait for monitorWorker to reap and close stopChan
+	if w.waitForStop(workerStopTimeout) {
+		return nil
+	}
+
+	// Escalate to SIGTERM
+	if err := w.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		log.Warnf("Failed to send SIGTERM to worker: %v", err)
+	}
+
+	if w.waitForStop(workerStopTimeout * 2) {
+		return nil
+	}
+
+	// Last resort: SIGKILL
+	log.Warnf("Worker %s did not exit after SIGTERM; sending SIGKILL", w.MeetingID)
+	_ = w.cmd.Process.Signal(syscall.SIGKILL)
+	return nil
+}
+
+// waitForStop waits for stopChan to close, returns true if stopped within timeout
+func (w *WorkerProcess) waitForStop(timeout time.Duration) bool {
+	select {
+	case <-w.stopChan:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func NewProcessManager(sdkKey, sdkSecret string, audioBus *stream.AudioBus, eventsBus *stream.EventBus, videoBus *stream.VideoBus, tracker manifest.Tracker) (*ProcessManager, error) {
 	workerBin, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable path: %w", err)
@@ -65,20 +127,24 @@ func NewProcessManager(sdkKey, sdkSecret string, audioBus *audio.Bus) (*ProcessM
 
 	return &ProcessManager{
 		audioBus:  audioBus,
+		eventsBus: eventsBus,
+		videoBus:  videoBus,
 		sdkKey:    sdkKey,
 		sdkSecret: sdkSecret,
-		basePort:  9000,
-		maxPort:   9999, // Allow 1000 concurrent workers
+		basePort:  basePort,
+		maxPort:   maxPort,
 		workerBin: workerBin,
+		manifest:  tracker,
+		meetingT0: make(map[string]int64),
 	}, nil
 }
 
 func (pm *ProcessManager) JoinMeeting(meetingID, password, displayName, joinToken string, enableAudio, enableVideo bool) error {
 	if _, exists := pm.workers.Load(meetingID); exists {
-		return fmt.Errorf("meeting %s already exists", meetingID)
+		return zoombot.ErrMeetingAlreadyExists
 	}
 
-	config := &MeetingConfig{
+	config := &zoombot.MeetingConfig{
 		MeetingID:   meetingID,
 		Password:    password,
 		DisplayName: displayName,
@@ -106,8 +172,10 @@ func (pm *ProcessManager) JoinMeeting(meetingID, password, displayName, joinToke
 		return fmt.Errorf("meeting %s already exists", meetingID)
 	}
 
-	// Start audio streaming from worker
+	// Start streaming from worker
 	go pm.streamAudioFromWorker(worker)
+	go pm.streamEventsFromWorker(worker)
+	go pm.streamVideoFromWorker(worker)
 
 	log.Infof("Successfully spawned worker for meeting: %s (PID: %d, Port: %d)", meetingID, worker.PID, worker.Port)
 	return nil
@@ -116,14 +184,34 @@ func (pm *ProcessManager) JoinMeeting(meetingID, password, displayName, joinToke
 func (pm *ProcessManager) allocatePort() int {
 	for i := 0; i < pm.maxPort-pm.basePort; i++ {
 		candidate := pm.basePort + int(atomic.AddUint32(&pm.nextPort, 1))%(pm.maxPort-pm.basePort)
-		if _, loaded := pm.usedPorts.LoadOrStore(candidate, true); !loaded {
+		if _, loaded := pm.usedPorts.LoadOrStore(candidate, true); loaded {
+			continue
+		}
+
+		// Verify port is actually available on OS
+		if pm.isPortAvailable(candidate) {
 			return candidate
 		}
+
+		// Port unavailable, remove from our map and try next
+		pm.usedPorts.Delete(candidate)
 	}
 	return 0
 }
 
-func (pm *ProcessManager) spawnWorker(config *MeetingConfig, port int) (*WorkerProcess, error) {
+// isPortAvailable checks if a port is actually available on the OS by attempting to bind it.
+func (pm *ProcessManager) isPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	listener.Close()
+	return true
+}
+
+// spawnWorker creates and starts a new worker process
+func (pm *ProcessManager) spawnWorker(config *zoombot.MeetingConfig, port int) (*WorkerProcess, error) {
 	workerConfig := map[string]interface{}{
 		"meeting_id":   config.MeetingID,
 		"password":     config.Password,
@@ -142,10 +230,12 @@ func (pm *ProcessManager) spawnWorker(config *MeetingConfig, port int) (*WorkerP
 		return nil, fmt.Errorf("failed to marshal worker config: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Create command - use the same binary with "worker" subcommand
-	cmd := exec.CommandContext(ctx, pm.workerBin, "worker", "-config", string(configJSON))
+	cmd := exec.Command(pm.workerBin, "worker", "-config", string(configJSON))
+	// Enable rich crash diagnostics for the worker process
+	cmd.Env = append(os.Environ(),
+		"GOTRACEBACK=crash", // full goroutine + native frames, core dump if possible
+	)
 	cmd.Stdout = os.Stdout // Forward stdout for debugging
 	cmd.Stderr = os.Stderr // Forward stderr for debugging
 
@@ -156,7 +246,6 @@ func (pm *ProcessManager) spawnWorker(config *MeetingConfig, port int) (*WorkerP
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to start worker process: %w", err)
 	}
 
@@ -164,35 +253,31 @@ func (pm *ProcessManager) spawnWorker(config *MeetingConfig, port int) (*WorkerP
 		MeetingID: config.MeetingID,
 		Port:      port,
 		PID:       cmd.Process.Pid,
-		Status:    StatusConnecting,
+		Status:    zoombot.StatusConnecting,
 		cmd:       cmd,
-		cancel:    cancel,
 		stopChan:  make(chan struct{}),
 		config:    config,
-		Stats: MeetingStats{
-			StartTime: time.Now(),
-		},
 	}
 
 	// Monitor process in background
 	go pm.monitorWorker(worker)
-	if err := pm.waitForWorkerReady(worker, 10*time.Second); err != nil {
+	if err := pm.waitForWorkerReady(worker, workerReadyTimeout); err != nil {
 		worker.Stop()
 		return nil, fmt.Errorf("worker failed to become ready: %w", err)
 	}
 
-	worker.Status = StatusInMeeting
+	worker.Status = zoombot.StatusInMeeting
 
 	return worker, nil
 }
 
+// waitForWorkerReady waits for the worker to become ready
 func (pm *ProcessManager) waitForWorkerReady(worker *WorkerProcess, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 1 * time.Second}
+	client := &http.Client{Timeout: healthCheckTimeout}
+	url := fmt.Sprintf("http://localhost:%d/health", worker.Port)
 
 	for time.Now().Before(deadline) {
-		// Try to connect to worker health endpoint
-		url := fmt.Sprintf("http://localhost:%d/health", worker.Port)
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
@@ -201,116 +286,57 @@ func (pm *ProcessManager) waitForWorkerReady(worker *WorkerProcess, timeout time
 				return nil
 			}
 		}
-
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(healthCheckInterval)
 	}
 
 	return fmt.Errorf("worker did not become ready within timeout")
 }
 
+// monitorWorker monitors the worker process and updates status
 func (pm *ProcessManager) monitorWorker(worker *WorkerProcess) {
 	err := worker.cmd.Wait()
 
 	if err != nil {
-		log.Errorf("Worker process for meeting %s exited with error: %v", worker.MeetingID, err)
-		worker.Status = StatusFailed
+		// Provide detailed exit diagnostics (exit code, signal, core dumped)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				if status.Signaled() {
+					log.Errorf("Worker %s crashed: signal=%s core=%v", worker.MeetingID, status.Signal(), status.CoreDump())
+				} else {
+					log.Errorf("Worker %s exited with status=%d", worker.MeetingID, status.ExitStatus())
+				}
+			} else {
+				log.Errorf("Worker %s exited with error (unknown status): %v", worker.MeetingID, err)
+			}
+		} else {
+			log.Errorf("Worker process for meeting %s exited with error: %v", worker.MeetingID, err)
+		}
+		worker.Status = zoombot.StatusFailed
 	} else {
 		log.Infof("Worker process for meeting %s exited normally", worker.MeetingID)
-		worker.Status = StatusIdle
+		worker.Status = zoombot.StatusIdle
 	}
 
 	// Clean up
 	close(worker.stopChan)
 	pm.workers.Delete(worker.MeetingID)
 	pm.usedPorts.Delete(worker.Port)
+	pm.handleManifestMeetingEnd(worker.MeetingID)
 }
 
-func (pm *ProcessManager) streamAudioFromWorker(worker *WorkerProcess) {
-	// Wait a bit for the worker to fully start
-	time.Sleep(1 * time.Second)
-
-	url := fmt.Sprintf("http://localhost:%d/audio", worker.Port)
-
-	// Create cancellable request
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		<-worker.stopChan
-		cancel()
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		log.Errorf("Failed to create audio stream request: %v", err)
-		return
+// GetMeeting returns a worker process by meeting ID
+func (pm *ProcessManager) GetMeeting(meetingID string) (*WorkerProcess, bool) {
+	value, exists := pm.workers.Load(meetingID)
+	if !exists {
+		return nil, false
 	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Errorf("Failed to connect to worker audio stream: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Errorf("Worker audio stream returned status: %d", resp.StatusCode)
-		return
-	}
-
-	log.Infof("Audio streaming started from worker: %s", worker.MeetingID)
-
-	// Read frames line by line (newline-delimited JSON)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		select {
-		case <-worker.stopChan:
-			log.Infof("Stopping audio stream for worker: %s", worker.MeetingID)
-			return
-		default:
-		}
-
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var frame audio.AudioFrame
-		if err := json.Unmarshal(line, &frame); err != nil {
-			log.Errorf("Failed to unmarshal audio frame: %v", err)
-			continue
-		}
-
-		// Publish to audio bus
-		published := true
-		if pm.audioBus != nil {
-			published = pm.audioBus.Publish(worker.MeetingID, &frame)
-		}
-
-		// Update statistics
-		worker.statsMux.Lock()
-		worker.Stats.FramesReceived++
-		worker.Stats.BytesReceived += uint64(len(frame.Data))
-		worker.Stats.LastFrameTime = time.Now()
-		if !published {
-			worker.Stats.FramesDropped++
-		}
-		worker.statsMux.Unlock()
-	}
-
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		log.Errorf("Error reading audio stream: %v", err)
-	}
-
-	log.Infof("Audio streaming ended for worker: %s", worker.MeetingID)
+	return value.(*WorkerProcess), true
 }
 
-// LeaveMeeting stops a worker process
 func (pm *ProcessManager) LeaveMeeting(meetingID string) error {
 	value, exists := pm.workers.LoadAndDelete(meetingID)
 	if !exists {
-		return fmt.Errorf("meeting %s not found", meetingID)
+		return zoombot.ErrMeetingNotFound
 	}
 
 	worker := value.(*WorkerProcess)
@@ -324,55 +350,88 @@ func (pm *ProcessManager) LeaveMeeting(meetingID string) error {
 	return nil
 }
 
-func (pm *ProcessManager) GetMeeting(meetingID string) (*WorkerProcess, bool) {
-	value, exists := pm.workers.Load(meetingID)
-	if !exists {
-		return nil, false
-	}
-	return value.(*WorkerProcess), true
-}
-
-func (pm *ProcessManager) ListMeetings() map[string]MeetingStatus {
-	result := make(map[string]MeetingStatus)
+func (pm *ProcessManager) ListMeetings() map[string]zoombot.StatusInfo {
+	result := make(map[string]zoombot.StatusInfo)
 	pm.workers.Range(func(key, value interface{}) bool {
 		id := key.(string)
 		worker := value.(*WorkerProcess)
-		result[id] = worker.Status
+		// Default to local cached status; upgrade with worker-reported StatusInfo if available
+		info := zoombot.StatusInfo{
+			State:  worker.Status.String(),
+			Detail: 0,
+		}
+		if state, err := pm.requestWorkerState(worker, zoombot.StateStatus); err == nil {
+			info = state.Status
+		} else {
+			log.Warnf("ListMeetings: failed to fetch status from worker %s: %v", id, err)
+		}
+		result[id] = info
 		return true
 	})
 	return result
 }
 
-func (pm *ProcessManager) GetMeetingStats(meetingID string) (*MeetingStats, error) {
-	value, exists := pm.workers.Load(meetingID)
-	if !exists {
-		return nil, fmt.Errorf("meeting %s not found", meetingID)
+// Status returns the status for a specific meeting.
+func (pm *ProcessManager) Status(meetingID string) (zoombot.StatusInfo, error) {
+	state, err := pm.State(meetingID, zoombot.StateStatus)
+	if err != nil {
+		return zoombot.StatusInfo{}, err
 	}
-
-	worker := value.(*WorkerProcess)
-	worker.statsMux.RLock()
-	stats := worker.Stats
-	worker.statsMux.RUnlock()
-	return &stats, nil
+	return state.Status, nil
 }
 
-func (pm *ProcessManager) GetAllStats() map[string]MeetingStats {
-	result := make(map[string]MeetingStats)
-	pm.workers.Range(func(key, value interface{}) bool {
-		id := key.(string)
-		worker := value.(*WorkerProcess)
-		worker.statsMux.RLock()
-		result[id] = worker.Stats
-		worker.statsMux.RUnlock()
-		return true
-	})
-	return result
+// Statistics returns the statistics for a specific meeting.
+func (pm *ProcessManager) Statistics(meetingID string) (zoombot.MeetingStatistics, error) {
+	state, err := pm.State(meetingID, zoombot.StateStatistics)
+	if err != nil {
+		return zoombot.MeetingStatistics{}, err
+	}
+	return state.Statistics, nil
+}
+
+// Users returns the list of users for a specific meeting.
+func (pm *ProcessManager) Users(meetingID string) ([]stream.UserInfo, error) {
+	state, err := pm.State(meetingID, zoombot.StateUsers)
+	if err != nil {
+		return nil, err
+	}
+	return state.Users, nil
+}
+
+// State returns a bundle of meeting data selected by mask.
+func (pm *ProcessManager) State(meetingID string, mask zoombot.StateMask) (zoombot.MeetingState, error) {
+	value, exists := pm.workers.Load(meetingID)
+	if !exists {
+		return zoombot.MeetingState{}, zoombot.ErrMeetingNotFound
+	}
+
+	return pm.requestWorkerState(value.(*WorkerProcess), mask)
+}
+
+func (pm *ProcessManager) requestWorkerState(worker *WorkerProcess, mask zoombot.StateMask) (zoombot.MeetingState, error) {
+	client := &http.Client{Timeout: stateRequestTimeout}
+	url := fmt.Sprintf("http://localhost:%d/state?mask=%d", worker.Port, mask)
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return zoombot.MeetingState{}, fmt.Errorf("request worker state: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return zoombot.MeetingState{}, fmt.Errorf("worker responded with %s", resp.Status)
+	}
+
+	var state zoombot.MeetingState
+	if err := gob.NewDecoder(resp.Body).Decode(&state); err != nil {
+		return zoombot.MeetingState{}, fmt.Errorf("decode worker state: %w", err)
+	}
+
+	return state, nil
 }
 
 // Shutdown gracefully shuts down all worker processes
 func (pm *ProcessManager) Shutdown() error {
-	log.Info("Shutting down process manager")
-
 	pm.workers.Range(func(key, value interface{}) bool {
 		id := key.(string)
 		worker := value.(*WorkerProcess)
@@ -398,26 +457,65 @@ func (pm *ProcessManager) GetMeetingCount() int {
 	return count
 }
 
-func (w *WorkerProcess) Stop() error {
-	if w.stopped {
-		return nil
+func (pm *ProcessManager) handleManifestEvent(event *stream.Event) {
+	if pm.manifest == nil || event == nil || event.MeetingID == "" {
+		return
+	}
+	pm.ensureManifestStart(event)
+	pm.manifest.OnUserEvent(event)
+}
+
+func (pm *ProcessManager) ensureManifestStart(event *stream.Event) {
+	if event.MediaTs == 0 || event.WallTs == 0 {
+		return
 	}
 
-	log.Infof("Stopping worker process: %s (PID: %d)", w.MeetingID, w.PID)
-	w.Status = StatusEnded
-	w.stopped = true
-
-	// Send SIGTERM to worker
-	if w.cmd != nil && w.cmd.Process != nil {
-		if err := w.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			log.Warnf("Failed to send SIGTERM to worker: %v", err)
-		}
+	pm.manifestMu.RLock()
+	_, exists := pm.meetingT0[event.MeetingID]
+	pm.manifestMu.RUnlock()
+	if exists {
+		return
 	}
 
-	// Cancel context (which will eventually SIGKILL via CommandContext)
-	if w.cancel != nil {
-		w.cancel()
+	t0 := event.WallTs - event.MediaTs
+
+	pm.manifestMu.Lock()
+	if _, exists := pm.meetingT0[event.MeetingID]; !exists {
+		pm.meetingT0[event.MeetingID] = t0
+		pm.manifestMu.Unlock()
+		pm.manifest.OnMeetingStart(event.MeetingID, t0)
+		return
+	}
+	pm.manifestMu.Unlock()
+}
+
+func (pm *ProcessManager) handleManifestMeetingEnd(meetingID string) {
+	if pm.manifest == nil || meetingID == "" {
+		return
+	}
+	pm.manifest.OnMeetingEnd(meetingID)
+	pm.manifestMu.Lock()
+	delete(pm.meetingT0, meetingID)
+	pm.manifestMu.Unlock()
+}
+
+func (pm *ProcessManager) handleManifestVideoFile(fileEvent *stream.FileEvent) {
+	if pm.manifest == nil || fileEvent == nil || !fileEvent.IsPlaylist {
+		return
 	}
 
-	return nil
+	// Use naming helper to parse video filename
+	info, err := manifest.ParseVideoFilename(fileEvent.Filename)
+	if err != nil {
+		// Not a valid video filename - skip silently
+		return
+	}
+
+	// Pass video segment info to manifest tracker
+	pm.manifest.OnVideoSegment(
+		fileEvent.MeetingID,
+		fileEvent.Filename,
+		info.Type == manifest.VideoTrackShare,
+		info.UserID,
+	)
 }

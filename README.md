@@ -8,7 +8,7 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 
 **核心功能：**
 - 实时音频采集（混音、单路、共享音频）
-- 屏幕共享内容采集（YUV I420 格式）（开发中）
+- 屏幕共享内容采集（H.264 编码输出）
 - WebSocket 实时音频流分发
 - RESTful API 会议管理
 - 多会议并发支持
@@ -37,6 +37,7 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 │  • zoom_sdk_create()                                        │
 │  • zoom_meeting_create_and_join()                           │
 │  • zoom_meeting_set_audio_callback()                        │
+│  • zoom_meeting_set_video_callback() (H.264 encoded)        │
 │  • zoom_sdk_run_loop()                                      │
 └─────────────────────┬───────────────────────────────────────┘
                       │
@@ -46,7 +47,8 @@ Headless Meeting Bot 是一个基于 Zoom SDK 的无界面会议机器人，可�
 │  • ZoomSDK (SDK 初始化与认证)                                 │
 │  • Meeting (会议管理与事件处理)                                │
 │  • AudioDelegate (音频数据回调)                               │
-│  • VideoDelegate (视频数据回调)                               │
+│  • VideoDelegate (视频数据回调 + H.264 编码)                   │
+│  • VideoEncodePipeline (x264 编码管道)                        │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -81,11 +83,13 @@ headless-meeting-bot/
 │   └── Meeting.{h,cpp}    # 会议管理
 ├── server/                # Go 服务实现
 │   ├── cmd/               # Web APP 入口
-│   ├── pkg/
-│   │   ├── audio/        # 音频总线
-│   │   ├── zoomsdk/      # SDK 绑定
-│   │   └── server/       # HTTP/WS 服务
-│   └── docker/           # Docker 部署
+│   └── pkg/
+│       ├── stream/       # 流媒体总线（音频、视频、事件）
+│       ├── zoomsdk/      # SDK 绑定
+│       ├── server/       # HTTP/WS 服务
+│       ├── config/       # 配置管理
+│       └── log/          # 日志工具
+├── docker/               # Docker 部署配置
 ├── jna/                  # Java Bindings（JNA）
 └── lib/                  # 第三方库
     ├── zoomsdk/          # Zoom SDK
@@ -262,14 +266,15 @@ const ws = new WebSocket(
 sequenceDiagram
     participant SDK
     participant MeetingShareEvent
-    participant Meeting
+    participant UserController
+    participant MediaController
     participant VideoDelegate
 
     SDK->>MeetingShareEvent: OnSharingStatus(START, sourceInfo)
-    MeetingShareEvent->>Meeting: subscribeShare(sourceInfo)
-    
-    Meeting->>SDK: SubscribeShareStream(sourceId)
-    SDK-->>Meeting: Subscribe Success
+    MeetingShareEvent->>UserController: onShareStart(sourceInfo)
+    UserController->>MediaController: updateShareSources(sourceInfo)
+    MediaController->>SDK: SubscribeShareStream(sourceId)
+    SDK-->>MediaController: Subscribe Success
     
     Note over SDK: Sharing in progress
     
@@ -278,8 +283,9 @@ sequenceDiagram
     C API->>Go: Video Callback
     
     SDK->>MeetingShareEvent: OnSharingStatus(STOP, sourceInfo)
-    MeetingShareEvent->>Meeting: unSubscribeShare(sourceInfo)
-    Meeting->>SDK: UnsubscribeShareStream(sourceId)
+    MeetingShareEvent->>UserController: onShareEnd(sourceInfo)
+    UserController->>MediaController: updateShareSources(sourceInfo)
+    MediaController->>SDK: UnsubscribeShareStream(sourceId)
 ```
 
 ### 2.3 关键设计细节
@@ -376,7 +382,7 @@ Frame Structure:
 - 考虑使用 shared memory 降低 IPC 延迟
 - Audio Bus 放在主进程，避免数据拷贝
 
-#### 2.4.4 视频数据量 (WIP)
+#### 2.4.4 视频数据处理
 
 **数据量估算：**
 - 1080p YUV420: 1920×1080×1.5 ≈ 3MB/frame
@@ -386,11 +392,13 @@ Frame Structure:
 **当前设计：**
 - 仅捕获屏幕共享（按需订阅）
 - 不捕获摄像头视频（降低资源消耗）
-- 视频数据由应用层自行压缩（H.264/VP8）
+- 视频数据自动 H.264 编码（x264 veryfast preset）
+- 编码后数据量：~1.5Mbps @ 1080p30 (约 99% 压缩率)
 
-**限制：**
-- WebSocket 不适合传输原始视频
-- 建议使用本地存储或外部转码服务
+**编码配置：**
+- 默认配置：30fps, veryfast preset
+- 支持自定义：width/height/fps/threads/preset
+- Annex B 格式输出，兼容 WebRTC/HLS/RTMP
 
 ---
 
@@ -457,7 +465,7 @@ go build -o headless-meeting-bot cmd/headless-meeting-bot/*.go
 #### 3.2.3 Docker 构建
 
 ```bash
-cd server/docker
+cd docker
 
 # 编译镜像（包含构建环境）
 ./docker-build.sh build
@@ -478,6 +486,13 @@ void on_audio(MeetingHandle meeting, const void* data, int length,
     printf("Audio: type=%d, user=%u, len=%d\n", type, user_id, length);
 }
 
+// H.264 编码视频回调
+void on_video(MeetingHandle meeting, const unsigned char* annexb_au,
+              int au_len, int is_keyframe, unsigned long long timestamp) {
+    // 处理 H.264 Annex B 访问单元
+    printf("Video: len=%d, keyframe=%d, ts=%llu\n", au_len, is_keyframe, timestamp);
+}
+
 int main() {
     // 1. 创建 SDK
     ZoomSDKHandle sdk = zoom_sdk_create(
@@ -493,16 +508,29 @@ int main() {
         "My Bot",            // display_name
         NULL,                // join_token
         1,                   // enable_audio
-        0                    // enable_video
+        1                    // enable_video (H.264 encoded)
     );
     
-    // 3. 设置回调
+    // 3. 设置音频回调
     zoom_meeting_set_audio_callback(meeting, on_audio);
     
-    // 4. 运行事件循环
+    // 4. 设置视频回调（可选配置编码参数）
+    ZoomVideoEncodeParams video_params = {
+        .width = 0,          // 自动检测
+        .height = 0,         // 自动检测
+        .fps = 0,            // 自动
+        .threads = 0,        // 自动
+        .preset = "veryfast" // 快速编码
+    };
+    zoom_meeting_set_video_callback(meeting, on_video, &video_params);
+    
+    // 或者使用默认参数：
+    // zoom_meeting_set_video_callback(meeting, on_video, NULL);
+    
+    // 5. 运行事件循环
     zoom_sdk_run_loop();  // 阻塞直到收到信号
     
-    // 5. 清理
+    // 6. 清理
     zoom_meeting_destroy(meeting);
     zoom_sdk_destroy(sdk);
     
@@ -537,14 +565,21 @@ curl http://localhost:8080/api/meetings/1234567890
 # Response: 200 OK
 {
   "meeting_id": "1234567890",
-  "status": "MEETING_STATUS_INMEETING",
-  "error": null,
+  "status": {
+    "state": "in_meeting",
+    "detail": 0
+  },
   "stats": {
+    "start_time": "2025-11-06T12:34:56Z",
     "frames_received": 12500,
-    "bytes_received": 1024000
+    "frames_dropped": 2,
+    "bytes_received": 1024000,
+    "last_frame_time": "2025-11-06T12:36:01Z"
   }
 }
 ```
+
+如果最近一次 SDK 调用返回了错误信息，会在 `status.error` 字段给出描述；当没有错误时该字段会被省略。
 
 **离开会议**
 
@@ -566,7 +601,7 @@ curl http://localhost:8080/api/meetings
 [
   {
     "meeting_id": "1234567890",
-    "status": "MEETING_STATUS_INMEETING"
+    "status": "in_meeting"
   }
 ]
 ```
@@ -720,14 +755,16 @@ cd server
 **1. Docker 内编译**
 
 ```bash
-./docker/docker-build.sh build
+cd docker
+./docker-build.sh build
 ```
 
 **2. 运行 Docker**
 
 ```bash
 # 构建镜像
-./docker/docker-build.sh deploy
+cd docker
+./docker-build.sh deploy
 
 # 运行容器
 docker run -d \
@@ -785,9 +822,11 @@ services:
 | `zoom_sdk_destroy(handle)` | 销毁 SDK |
 | `zoom_meeting_create_and_join(...)` | 创建并加入会议 |
 | `zoom_meeting_destroy(handle)` | 离开并销毁会议 |
-| `zoom_meeting_get_status(handle)` | 获取会议状态 |
+| `zoom_meeting_set_status_callback(handle, cb)` | 注册会议状态回调 |
 | `zoom_meeting_set_audio_callback(handle, cb)` | 设置音频回调 |
-| `zoom_meeting_set_video_callback(handle, cb)` | 设置视频回调 |
+| `zoom_meeting_set_user_status_callback(handle, cb)` | 注册参会者状态回调 |
+| `zoom_meeting_set_hls_video_callback(handle, cb, params)` | 设置 HLS 视频编码/推流回调 |
+| `zoom_meeting_video_encoder_request_idr(handle)` | 请求关键帧 |
 | `zoom_sdk_run_loop()` | 运行事件循环 |
 | `zoom_sdk_stop_loop()` | 停止事件循环 |
 

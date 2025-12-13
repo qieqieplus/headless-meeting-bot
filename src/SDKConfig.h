@@ -1,34 +1,27 @@
-#ifndef HEADLESS_ZOOM_BOT_SDK_CONFIG_H
-#define HEADLESS_ZOOM_BOT_SDK_CONFIG_H
+#pragma once
 
 #include <string>
 
-
 class SDKConfig {
-private:
-    std::string m_sdkKey;
-    std::string m_sdkSecret;
-    std::string m_zoomHost;
+ private:
+  std::string sdk_key_;
+  std::string sdk_secret_;
+  std::string zoom_host_;
 
-public:
-    SDKConfig(const std::string& sdkKey = "",
-              const std::string& sdkSecret = "",
-              const std::string& zoomHost = "https://zoom.us");
+ public:
+  explicit SDKConfig(const std::string& sdk_key = "", const std::string& sdk_secret = "",
+                     const std::string& zoom_host = "https://zoom.us");
 
-    // Getters
-    const std::string& sdkKey() const { return m_sdkKey; }
-    const std::string& sdkSecret() const { return m_sdkSecret; }
-    const std::string& zoomHost() const { return m_zoomHost; }
-    
-    // Setters
-    void setSdkKey(const std::string& sdkKey) { m_sdkKey = sdkKey; }
-    void setSdkSecret(const std::string& sdkSecret) { m_sdkSecret = sdkSecret; }
-    void setZoomHost(const std::string& zoomHost) { m_zoomHost = zoomHost; }
-    
-    // Validation
-    bool isValid() const {
-        return !m_sdkKey.empty() && !m_sdkSecret.empty();
-    }
+  // Getters
+  const std::string& SdkKey() const { return sdk_key_; }
+  const std::string& SdkSecret() const { return sdk_secret_; }
+  const std::string& ZoomHost() const { return zoom_host_; }
+
+  // Setters
+  void SetSdkKey(const std::string& sdk_key) { sdk_key_ = sdk_key; }
+  void SetSdkSecret(const std::string& sdk_secret) { sdk_secret_ = sdk_secret; }
+  void SetZoomHost(const std::string& zoom_host) { zoom_host_ = zoom_host; }
+
+  // Validation
+  bool IsValid() const { return !sdk_key_.empty() && !sdk_secret_.empty(); }
 };
-
-#endif //HEADLESS_ZOOM_BOT_SDK_CONFIG_H

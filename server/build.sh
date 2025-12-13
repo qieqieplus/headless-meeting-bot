@@ -22,7 +22,7 @@ export BUILD_LIB_PATH="${ZOOM_C_LIB_PATH}"
 
 # Set CGO flags for compilation and linking
 export CGO_CFLAGS="-I${SRC_API_PATH}"
-export CGO_LDFLAGS="-L${BUILD_LIB_PATH} -lzoomsdk_c -Wl,-rpath,${BUILD_LIB_PATH}"
+export CGO_LDFLAGS="-L${BUILD_LIB_PATH} -lzoombot_c -Wl,-rpath,${BUILD_LIB_PATH}"
 
 # --- Build ---
 echo "--- Building Go Server ---"
@@ -40,11 +40,11 @@ cd "${SCRIPT_DIR}"
 
 # Build the unified binary (includes both server and worker modes)
 echo "Building headless-meeting-bot (unified binary)..."
-CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go build -v -o headless-meeting-bot ./cmd/headless-meeting-bot
+CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" GOEXPERIMENT=cgocheck2 go build -v -o headless-meeting-bot ./cmd/headless-meeting-bot
 
 echo "--- Build Complete ---"
 echo "Binary created: $(pwd)/headless-meeting-bot"
 echo ""
 echo "Usage:"
 echo "  ./headless-meeting-bot server    # Start main server"
-echo "  ./headless-meeting-bot worker    # Start worker (used internally by server)"
+echo "  ./headless-meeting-bot worker    # Start worker (managed by server)"
